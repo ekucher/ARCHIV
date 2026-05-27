@@ -2,6 +2,10 @@
 *.log
 logs/
 Logs/
+LOGS/
+Trace/
+exchangAPI/
+LIMS/
 
 # Тимчасові файли
 tmp/
@@ -9,6 +13,7 @@ temp/
 *.tmp
 *.bak
 *.old
+*.out
 
 # PowerShell debug / transcript
 PowerShell_transcript.*
@@ -24,6 +29,10 @@ PowerShell_transcript.*
 # Credentials / ключі / сертифікати
 *credential*
 *credentials*
+*.Credentials.ps1
+BRAVO.Credentials.ps1
+BRAVO.config.local.ps1
+BRAVO.config.ps1
 *.key
 *.pem
 *.pfx
@@ -41,13 +50,3 @@ Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
-
-*.Credentials.ps1
-BRAVO.Credentials.ps1
-BRAVO.config.local.ps1
-BRAVO.config.ps1
-LOGS/
-Trace/
-exchangAPI/
-LIMS/
-
