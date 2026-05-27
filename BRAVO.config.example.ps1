@@ -17,6 +17,9 @@
 
     MinFreeSpaceGB = 10
     MaxMdFileSizeGB = 1.5
+    ExcludedMdSizeCheckFiles = @(
+    "KZPpatArc.md"
+    )
 
     # Paths
     BravoWebDir = "D:\Br-a-vo.web"
@@ -53,5 +56,5 @@ SevenZipExtractArgs = @(
 )
 
 ArchivePassword = ""
-    
+
 }

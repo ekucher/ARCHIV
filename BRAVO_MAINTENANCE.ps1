@@ -100,6 +100,10 @@ $MIN_FREE_SPACE = [double](Get-BravoConfigValue -Name "MinFreeSpaceGB" -Default 
 $MaxMdFileSizeGB = [double](Get-BravoConfigValue -Name "MaxMdFileSizeGB" -Default 1.5)
 $MAX_MD_FILE_SIZE = [int64]($MaxMdFileSizeGB * 1GB)
 
+$ExcludedMdSizeCheckFiles = @(
+    Get-BravoConfigValue -Name "ExcludedMdSizeCheckFiles" -Default @()
+)
+
 $BRAVO_WEB_DIR = [string](Get-BravoConfigValue -Name "BravoWebDir" -Default "D:\Br-a-vo.web")
 
 $AutoShutdownDefault = [string](Get-BravoConfigValue -Name "AutoShutdown" -Default "off")
@@ -1130,31 +1134,107 @@ function Verify-Backup {
 # Функція перевірки розмірів .md файлів
 function Check-MdFileSizes {
     param(
-        $MODEL_PATH,
-        $MAX_MD_FILE_SIZE
+        [string]$MODEL_PATH,
+        [int64]$MAX_MD_FILE_SIZE,
+        [string[]]$ExcludedFiles = @()
     )
-    
+
     Write-Log "==="
     Write-Log "=== ПЕРЕВІРКА РОЗМІРІВ .MD ФАЙЛІВ ==="
     Write-Log "Перевірка розмірів файлів .md..." -Level "INFO"
-    
-    $largeFiles = Get-ChildItem -Path $MODEL_PATH -Recurse -Filter *.md | 
-                  Where-Object { $_.Length -gt $MAX_MD_FILE_SIZE }
 
-    if ($largeFiles) {
-        # Формуємо список файлів через StringBuilder
+    if (-not (Test-Path $MODEL_PATH)) {
+        $errorMsg = "Директорія моделі не знайдена: $MODEL_PATH"
+        Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+        Send-SlackAlert -Message $errorMsg -IsCritical
+        $global:criticalErrorOccurred = $true
+        return
+    }
+
+    $normalizedExclusions = @($ExcludedFiles) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object {
+            $_.Trim().Replace('/', '\').ToLowerInvariant()
+        }
+
+    function Test-MdFileExcluded {
+        param(
+            [System.IO.FileInfo]$File,
+            [string]$BasePath,
+            [string[]]$Patterns
+        )
+
+        if (-not $Patterns -or $Patterns.Count -eq 0) {
+            return $false
+        }
+
+        $baseFullPath = (Resolve-Path -LiteralPath $BasePath).Path.TrimEnd('\')
+        $fileFullPath = $File.FullName
+
+        if ($fileFullPath.StartsWith($baseFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relativePath = $fileFullPath.Substring($baseFullPath.Length).TrimStart('\')
+        }
+        else {
+            $relativePath = $File.Name
+        }
+
+        $fileNameNormalized = $File.Name.Replace('/', '\').ToLowerInvariant()
+        $relativePathNormalized = $relativePath.Replace('/', '\').ToLowerInvariant()
+
+        foreach ($pattern in $Patterns) {
+            if ($fileNameNormalized -like $pattern -or $relativePathNormalized -like $pattern) {
+                return $true
+            }
+        }
+
+        return $false
+    }
+
+    if ($normalizedExclusions.Count -gt 0) {
+        Write-Log "Виключення з перевірки .md файлів: $($normalizedExclusions -join ', ')" -Level "INFO"
+    }
+
+    $allMdFiles = Get-ChildItem -Path $MODEL_PATH -Recurse -Filter "*.md" -File -ErrorAction SilentlyContinue
+
+    $excludedMdFiles = @(
+        $allMdFiles | Where-Object {
+            Test-MdFileExcluded -File $_ -BasePath $MODEL_PATH -Patterns $normalizedExclusions
+        }
+    )
+
+    $largeFiles = @(
+        $allMdFiles | Where-Object {
+            $_.Length -gt $MAX_MD_FILE_SIZE -and
+            -not (Test-MdFileExcluded -File $_ -BasePath $MODEL_PATH -Patterns $normalizedExclusions)
+        }
+    )
+
+    if ($excludedMdFiles.Count -gt 0) {
+        Write-Log "Пропущено за виключеннями .md файлів: $($excludedMdFiles.Count)" -Level "INFO"
+
+        foreach ($file in $excludedMdFiles) {
+            $relativePath = $file.FullName.Replace($MODEL_PATH, "").TrimStart('\')
+            $sizeFormatted = Format-FileSize $file.Length
+            Write-Log "  Виключено: $relativePath : $sizeFormatted" -Level "DEBUG"
+        }
+    }
+
+    if ($largeFiles.Count -gt 0) {
         $fileListBuilder = [System.Text.StringBuilder]::new()
+
         foreach ($file in $largeFiles) {
             $sizeFormatted = Format-FileSize $file.Length
             $relativePath = $file.FullName.Replace($MODEL_PATH, "").TrimStart('\')
             [void]$fileListBuilder.AppendLine("- $relativePath : $sizeFormatted")
         }
-        $fileList = $fileListBuilder.ToString()
 
+        $fileList = $fileListBuilder.ToString()
         $message = "Знайдено $($largeFiles.Count) файлів .md, розмір яких перевищує $($MAX_MD_FILE_SIZE / 1MB) МБ:`n$fileList"
+
         Write-Log $message -Level "WARNING"
         Send-SlackAlert -Message $message -IsCritical
-    } else {
+    }
+    else {
         Write-Log "Файли .md з розміром більше $($MAX_MD_FILE_SIZE / 1MB) МБ не знайдено." -Level "INFO"
     }
 }
@@ -1605,7 +1685,10 @@ try {
 }
 
 # ===== ПЕРЕВІРКА РОЗМІРІВ ФАЙЛІВ .md =====
-Check-MdFileSizes -MODEL_PATH $MODEL_PATH -MAX_MD_FILE_SIZE $MAX_MD_FILE_SIZE
+Check-MdFileSizes `
+    -MODEL_PATH $MODEL_PATH `
+    -MAX_MD_FILE_SIZE $MAX_MD_FILE_SIZE `
+    -ExcludedFiles $ExcludedMdSizeCheckFiles
 
 # ===== ОПЕРАЦІЇ ПІСЛЯ ЗУПИНКИ СЕРВІСІВ =====
 $bravoStatus = if ($bravoService) { (Get-Service -Name $BravoServiceName).Status } else { 'Unknown' }
