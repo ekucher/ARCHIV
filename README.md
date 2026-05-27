@@ -1,4 +1,4 @@
-# ARCHIV
+﻿# ARCHIV
 
 PowerShell automation for BravoSoft/LIMS maintenance on Windows.
 
@@ -197,3 +197,51 @@ At a high level, the script:
 - Keep generated archives and logs out of Git.
 - Before enabling scheduled restore, verify that `ArchivePassword`, `ArchivePrefix`, `RestoreDay`, `RestoreTime`, and available disk space are configured correctly.
 - Before enabling `AutoShutdown`, make sure the script is running in an expected maintenance window.
+
+## Scheduler and Windows Credential Manager
+
+Sensitive values can be moved from `BRAVO.config.ps1` to Windows Credential Manager.
+
+Save credentials for the current Windows user:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -SetupCredentials
+```
+
+Install the scheduled task and create a dedicated local scheduler user:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -InstallScheduledTask -TaskTime 23:00 -TaskDaysOfWeek Sunday -AddTaskUserToAdministrators
+```
+
+Reset the generated scheduler-user password and reinstall the task:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -InstallScheduledTask -TaskTime 23:00 -TaskDaysOfWeek Sunday -AddTaskUserToAdministrators -ResetTaskUserPassword
+```
+
+Notes:
+
+- The dedicated scheduler user is hidden from the Windows logon screen.
+- Interactive and Remote Desktop logon are denied for the scheduler user.
+- The user is granted `Log on as a batch job`.
+- Hiding the user from the logon screen is not a security boundary; administrators can still see and manage the account.
+- Windows Credential Manager Generic Credentials are stored per Windows user. The scheduled task must run under a user that can read the required credential targets.
+
+### Task-user credential bootstrap
+
+When `-InstallScheduledTask` is used, the script now tries to copy the required BRAVO secrets into the dedicated scheduled-task user's Windows Credential Manager profile.
+
+The bootstrap flow is:
+
+1. Read `BRAVO/ArchivePassword` and `BRAVO/SlackWebhookUrl` from the current user's Windows Credential Manager, with local config fallback during migration.
+2. Create or update the dedicated scheduler user.
+3. Run a temporary one-time scheduled task under that scheduler user.
+4. Save the same credential targets into that user's Credential Manager profile.
+5. Delete the temporary bootstrap task and temporary payload files.
+
+Skip this bootstrap only when you intentionally manage credentials for the scheduler user yourself:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -InstallScheduledTask -TaskTime 23:00 -TaskDaysOfWeek Sunday -AddTaskUserToAdministrators -SkipTaskUserCredentialBootstrap
+```
