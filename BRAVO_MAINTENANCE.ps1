@@ -6,12 +6,6 @@
 
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass –Force
 
-# За потреби запит на підвищення дозволу виконання скрипта
-If (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
-	Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-	Exit
-}
-
 param (
     [switch]$ForceRestore,
     [switch]$DisableSizeCheck,
@@ -20,6 +14,12 @@ param (
     [string]$AutoShutdown,
     [string]$ArchivLims
 )
+
+# За потреби запит на підвищення дозволу виконання скрипта
+If (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
+	Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+	Exit
+}
 
 # Enforce modern security protocol
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
