@@ -1152,15 +1152,15 @@ function Check-MdFileSizes {
     }
 
     $displayExclusions = @($ExcludedFiles) |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-    ForEach-Object {
-        $_.Trim().Replace('/', '\')
-    }
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object {
+            $_.Trim().Replace('/', '\')
+        }
 
     $normalizedExclusions = @($displayExclusions) |
-    ForEach-Object {
-        $_.ToLowerInvariant()
-    }
+        ForEach-Object {
+            $_.ToLowerInvariant()
+        }
 
     function Test-MdFileExcluded {
         param(
@@ -1196,7 +1196,7 @@ function Check-MdFileSizes {
     }
 
     if ($displayExclusions.Count -gt 0) {
-    Write-Log "Виключення з перевірки .md файлів: $($displayExclusions -join ', ')" -Level "INFO"
+        Write-Log "Виключення з перевірки .md файлів: $($displayExclusions -join ', ')" -Level "INFO"
     }
 
     $allMdFiles = Get-ChildItem -Path $MODEL_PATH -Recurse -Filter "*.md" -File -ErrorAction SilentlyContinue
