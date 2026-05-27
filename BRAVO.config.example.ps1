@@ -18,7 +18,7 @@
     MinFreeSpaceGB = 10
     MaxMdFileSizeGB = 1.5
     ExcludedMdSizeCheckFiles = @(
-    "KZPpatArc.md"
+    "ExampleLargeFile.md"
     )
 
     # Paths
