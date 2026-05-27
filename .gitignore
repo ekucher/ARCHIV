@@ -72,6 +72,9 @@ Desktop.ini
 /*.bak_*
 /*.tmp
 
+ARCHIV_BRAVO.cmd
+ARCHIV_BRAVO.ps1
+
 # Logs / generated reports
 /*.log
 /*.csv
