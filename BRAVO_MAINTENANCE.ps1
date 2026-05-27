@@ -1424,7 +1424,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 # Enforce modern security protocol
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Set-BravoTlsProtocol
 
 # Clear console
 Clear-Host
@@ -1677,6 +1677,66 @@ $restoreDayMap = @{
 $RestoreDayOfWeek = $restoreDayMap[$RestoreDay]
 $RestoreDayName = $RestoreDayOfWeek.ToString()
 
+function Set-BravoTlsProtocol {
+    try {
+        $protocols = [Net.SecurityProtocolType]::Tls12
+
+        if ([Enum]::GetNames([Net.SecurityProtocolType]) -contains "Tls13") {
+            $protocols = $protocols -bor [Net.SecurityProtocolType]::Tls13
+        }
+
+        [Net.ServicePointManager]::SecurityProtocol = $protocols
+        [Net.ServicePointManager]::Expect100Continue = $false
+    }
+    catch {
+        Set-BravoTlsProtocol
+    }
+}
+
+function Invoke-BravoSlackWebhook {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [int]$TimeoutSec = 30
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SlackWebhookUrl)) {
+        throw "SlackWebhookUrl is empty"
+    }
+
+    Set-BravoTlsProtocol
+
+    $slackBody = @{
+        text = $Message
+    }
+
+    $jsonBody = $slackBody | ConvertTo-Json -Depth 10 -Compress
+
+    try {
+        Invoke-RestMethod `
+            -Uri $SlackWebhookUrl `
+            -Method Post `
+            -Body $jsonBody `
+            -ContentType "application/json; charset=utf-8" `
+            -TimeoutSec $TimeoutSec `
+            -ErrorAction Stop | Out-Null
+    }
+    catch {
+        $errorMessage = $_.Exception.Message
+
+        if ($_.Exception.InnerException) {
+            $errorMessage += " | InnerException: $($_.Exception.InnerException.Message)"
+        }
+
+        if ($_.ErrorDetails) {
+            $errorMessage += " | Response: $($_.ErrorDetails)"
+        }
+
+        throw "Slack webhook POST failed: $errorMessage"
+    }
+}
+
 # Функція відправки Slack сповіщень
 function Send-SlackAlert {
     param(
@@ -1700,34 +1760,12 @@ function Send-SlackAlert {
         if ($script:SlackMode -eq "errors_only" -or $script:SlackMode -eq "all") {
             if ($isSpaceError) {
                 # Для помилок місця - негайна відправка
-                $slackBody = @{
-                    text = $Message
-                }
-                
                 try {
-                    $jsonBody = $slackBody | ConvertTo-Json -Compress
-                    $utf8 = [System.Text.Encoding]::UTF8
-                    $bytes = $utf8.GetBytes($jsonBody)
-                    
-                    $request = [System.Net.WebRequest]::Create($SlackWebhookUrl)
-                    $request.Method = "POST"
-                    $request.ContentType = "application/json; charset=utf-8"
-                    $request.ContentLength = $bytes.Length
-                    
-                    $stream = $request.GetRequestStream()
-                    $stream.Write($bytes, 0, $bytes.Length)
-                    $stream.Close()
-                    
-                    $response = $request.GetResponse()
-                    $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), $utf8)
-                    $reader.ReadToEnd() | Out-Null
-                    $reader.Close()
-                    $response.Close()
-                    
+                    Invoke-BravoSlackWebhook -Message $Message
                     Write-Log "Критичне повідомлення (помилки місця) відправлено в Slack" -Level "INFO"
                 }
                 catch {
-                    Write-Log "ПОМИЛКА негайної відправки: $($_.Exception.Message)" -Level "ERROR"
+                    Write-Log "ПОМИЛКА негайної відправки в Slack: $($_.Exception.Message)" -Level "ERROR"
                 }
             }
             else {
@@ -2611,14 +2649,7 @@ function Send-FinalReport {
     }
     
     try {
-        # Використовуємо WebClient для більш стабільної роботи
-        $webClient = New-Object System.Net.WebClient
-        $webClient.Encoding = [System.Text.Encoding]::UTF8
-        $webClient.Headers.Add("Content-Type", "application/json")
-        
-        $jsonBody = $slackBody | ConvertTo-Json @jsonSettings
-        $response = $webClient.UploadString($SlackWebhookUrl, "POST", $jsonBody)
-        
+        Invoke-BravoSlackWebhook -Message $slackMsg
         Write-Log -Message "Фінальне повідомлення відправлено в Slack" -Level "SUCCESS"
     }
     catch {
