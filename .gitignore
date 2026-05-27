@@ -4,7 +4,6 @@ logs/
 Logs/
 LOGS/
 Trace/
-Tools/
 exchangAPI/
 LIMS/
 
@@ -51,3 +50,29 @@ Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
+
+# ===== BRAVO / ARCHIV runtime data =====
+/BAZA/
+/BLOG/
+/BRAVOEXCH/
+/exchangAPI/
+/LIMS/
+/LOGS/
+/STATE/
+/Trace/
+
+# Local configs / secrets
+/BRAVO.config.ps1
+/ARCHIV_BRAVO.config.ps1
+/BRAVO.Credentials.ps1
+
+# Patch / backup files
+/Apply-BRAVO-*.ps1
+/*.bak_*
+/*.tmp
+
+# Logs / generated reports
+/*.log
+/*.csv
+/*.mdz
+/*.sha512
