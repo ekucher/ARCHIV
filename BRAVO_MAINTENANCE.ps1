@@ -169,6 +169,7 @@ function New-BravoProgressState {
         Status         = "Running"
         StartedAt      = (Get-Date).ToString("o")
         UpdatedAt      = (Get-Date).ToString("o")
+        FinishedAt     = $null
         ResumeCount    = 0
         CurrentStep    = $null
         CompletedSteps = @()
@@ -274,7 +275,15 @@ function Close-BravoProgressState {
 
     $script:BravoProgressState.Status = $Status
     $script:BravoProgressState.CurrentStep = $null
-    $script:BravoProgressState.FinishedAt = (Get-Date).ToString("o")
+
+    $finishedAt = (Get-Date).ToString("o")
+    if ($script:BravoProgressState.PSObject.Properties["FinishedAt"]) {
+        $script:BravoProgressState.FinishedAt = $finishedAt
+    }
+    else {
+        # FinishedAt property is missing in older/existing state files.
+        $script:BravoProgressState | Add-Member -NotePropertyName "FinishedAt" -NotePropertyValue $finishedAt -Force
+    }
 
     Save-BravoProgressState -State $script:BravoProgressState
 }
