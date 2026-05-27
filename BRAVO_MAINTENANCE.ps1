@@ -1557,6 +1557,13 @@ $SlackWebhookCredentialTarget = [string](Get-BravoConfigValue -Name "SlackWebhoo
 # Archive password mode is needed before -SetupCredentials so the setup wizard can decide
 # whether archive password should be requested according to BRAVO.config.ps1.
 $ArchivePasswordEnabled = [string](Get-BravoConfigValue -Name "ArchivePasswordEnabled" -Default "on")
+$ArchivePasswordEncryptHeaders = [string](Get-BravoConfigValue -Name "ArchivePasswordEncryptHeaders" -Default "on")
+$ArchivePasswordEncryptHeaders = if ([string]::IsNullOrWhiteSpace($ArchivePasswordEncryptHeaders)) { "on" } else { $ArchivePasswordEncryptHeaders.ToLowerInvariant() }
+
+if ($ArchivePasswordEncryptHeaders -notin @("on", "off")) {
+    Write-Host "ERROR: ArchivePasswordEncryptHeaders must be 'on' or 'off'. Current value: $ArchivePasswordEncryptHeaders" -ForegroundColor Red
+    exit 1
+}
 $ArchivePasswordEnabled = if ([string]::IsNullOrWhiteSpace($ArchivePasswordEnabled)) { "on" } else { $ArchivePasswordEnabled.ToLowerInvariant() }
 
 if ($ArchivePasswordEnabled -notin @("on", "off")) {
@@ -1811,6 +1818,10 @@ $ApacheServiceExists = ($ApacheService -ne $null)
 $arcCommonParams = @($SevenZipArchiveArgs)
 if ($ArchivePasswordEnabled -eq "on" -and -not [string]::IsNullOrWhiteSpace($ArchivePassword)) {
     $arcCommonParams += "-p$ArchivePassword"
+
+    if ($ArchivePasswordEncryptHeaders -eq "on") {
+        $arcCommonParams += "-mhe=on"
+    }
 }
 
 # ===== GLOBAL RUNTIME VARIABLES =====
@@ -2372,6 +2383,251 @@ function Invoke-CommandWithLog {
     return $LASTEXITCODE
 }
 
+# >>> BRAVO_VERIFIED_ARCHIVE BEGIN
+# --------------------------------
+# Safe archive creation: temp archive -> 7-Zip test -> final move
+# --------------------------------
+
+function Invoke-Bravo7ZipSafe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [array]$Arguments,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    Write-Log "$Description..." -Level "INFO"
+
+    $maskedArgs = @()
+    foreach ($arg in @($Arguments)) {
+        $argText = [string]$arg
+        if ($argText -like "-p*") {
+            $maskedArgs += "-p***"
+        }
+        else {
+            $maskedArgs += $argText
+        }
+    }
+
+    Write-Log "7-Zip: $Command $($maskedArgs -join ' ')" -Level "DEBUG"
+
+    try {
+        $output = & $Command @Arguments 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        if (-not [string]::IsNullOrWhiteSpace($output)) {
+            Write-Log "7-Zip output:$output" -Level "DEBUG"
+        }
+
+        if ($exitCode -eq 0) {
+            Write-Log "$Description успішно завершено" -Level "SUCCESS"
+        }
+        elseif ($exitCode -eq 1) {
+            Write-Log "$Description завершено з попередженнями. Код: $exitCode" -Level "WARNING"
+        }
+        else {
+            Write-Log "ПОМИЛКА під час $Description. Код: $exitCode" -Level "ERROR"
+        }
+
+        return [int]$exitCode
+    }
+    catch {
+        Write-Log "ПОМИЛКА під час ${Description}: $($_.Exception.Message)" -Level "ERROR"
+        return 1
+    }
+}
+
+function Expand-BravoArchiveToken {
+    param([string]$Value)
+
+    if ($null -eq $Value) {
+        return ""
+    }
+
+    $expanded = [string]$Value
+    $expanded = $expanded.Replace("{ROOT_LIMS}", [string]$ROOT_LIMS)
+    $expanded = $expanded.Replace("{ARC_DIR}", [string]$ARC_DIR)
+    $expanded = $expanded.Replace("{LOG_DIR}", [string]$LOG_DIR)
+    $expanded = $expanded.Replace("{ArchivePrefix}", [string]$ArchivePrefix)
+
+    return [Environment]::ExpandEnvironmentVariables($expanded)
+}
+
+function New-BravoSafeTempArchivePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FinalArchivePath
+    )
+
+    $archiveDir = Split-Path -Path $FinalArchivePath -Parent
+
+    $configuredTempDir = Get-BravoConfigValue -Name "ArchiveTempDir" -Default "{ROOT_LIMS}\ARCHIV\TEMP"
+    $tempRoot = Expand-BravoArchiveToken -Value ([string]$configuredTempDir)
+
+    if ([string]::IsNullOrWhiteSpace($tempRoot)) {
+        $tempRoot = Join-Path -Path $ROOT_LIMS -ChildPath "ARCHIV\TEMP"
+    }
+
+    if (-not (Test-Path -LiteralPath $tempRoot)) {
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+    }
+
+    $extension = [System.IO.Path]::GetExtension($FinalArchivePath)
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        $extension = ".mdz"
+    }
+
+    $safePrefix = [System.IO.Path]::GetFileNameWithoutExtension($FinalArchivePath)
+    $safePrefix = $safePrefix -replace '[^A-Za-z0-9_\-]', '_'
+
+    return Join-Path -Path $tempRoot -ChildPath ("archive_{0}_{1}{2}" -f $safePrefix, ([guid]::NewGuid().ToString("N")), $extension)
+}
+
+function Remove-BravoSafeTempArchive {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return
+    }
+
+    if (Test-Path -LiteralPath $Path -ErrorAction SilentlyContinue) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-BravoArchiveSourcePath {
+    param([string]$SourcePath)
+
+    if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+        return $false
+    }
+
+    $sourceToCheck = $SourcePath
+
+    if ($sourceToCheck.EndsWith("\*")) {
+        $sourceToCheck = $sourceToCheck.Substring(0, $sourceToCheck.Length - 2)
+    }
+
+    return (Test-Path -Path $sourceToCheck)
+}
+
+function New-BravoVerifiedArchive {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArchivePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$SourcePath,
+
+        [Parameter(Mandatory = $true)]
+        [array]$ArcCommonParams,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ARC_PATH,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    $archiveName = [System.IO.Path]::GetFileName($ArchivePath)
+    $archiveDir = Split-Path -Path $ArchivePath -Parent
+    $tempArchivePath = $null
+
+    if (-not (Test-Path -LiteralPath $archiveDir)) {
+        New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
+    }
+
+    if (-not (Test-BravoArchiveSourcePath -SourcePath $SourcePath)) {
+        $errorMsg = "${Description}: джерело не знайдено: $SourcePath"
+        Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+        Send-SlackAlert -Message $errorMsg -IsCritical
+        $global:criticalErrorOccurred = $true
+        return $false
+    }
+
+    $tempArchivePath = New-BravoSafeTempArchivePath -FinalArchivePath $ArchivePath
+
+    Write-Log "${Description}: тимчасовий архів: $tempArchivePath" -Level "DEBUG"
+    Write-Log "${Description}: фінальний архів після перевірки: $ArchivePath" -Level "DEBUG"
+
+    try {
+        $createArgs = @($ArcCommonParams) + @($tempArchivePath, $SourcePath)
+        $createExitCode = Invoke-Bravo7ZipSafe `
+            -Command $ARC_PATH `
+            -Arguments $createArgs `
+            -Description "$Description (тимчасовий архів)"
+
+        if (($createExitCode -ne 0 -and $createExitCode -ne 1) -or -not (Test-Path -LiteralPath $tempArchivePath)) {
+            $errorMsg = "${Description}: тимчасовий архів не створено або 7-Zip повернув код $createExitCode. Файл: $tempArchivePath"
+            Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+            Send-SlackAlert -Message $errorMsg -IsCritical
+            Remove-BravoSafeTempArchive -Path $tempArchivePath
+            $global:criticalErrorOccurred = $true
+            return $false
+        }
+
+        if ($createExitCode -eq 1) {
+            Write-Log "${Description}: 7-Zip створив архів із попередженнями, виконується обов'язкова перевірка цілісності." -Level "WARNING"
+        }
+
+        $testArgs = @("t")
+
+        if ($ArchivePasswordEnabled -eq "on" -and -not [string]::IsNullOrWhiteSpace($ArchivePassword)) {
+            $testArgs += "-p$ArchivePassword"
+        }
+
+        $testArgs += $tempArchivePath
+
+        $testExitCode = Invoke-Bravo7ZipSafe `
+            -Command $ARC_PATH `
+            -Arguments $testArgs `
+            -Description "$Description (перевірка 7-Zip)"
+
+        if ($testExitCode -ne 0) {
+            $errorMsg = "${Description}: архів не пройшов перевірку 7-Zip. Код: $testExitCode. Тимчасовий файл видалено: $tempArchivePath"
+            Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+            Send-SlackAlert -Message $errorMsg -IsCritical
+            Remove-BravoSafeTempArchive -Path $tempArchivePath
+            $global:criticalErrorOccurred = $true
+            return $false
+        }
+
+        Write-Log "${Description}: тимчасовий архів пройшов перевірку 7-Zip" -Level "SUCCESS"
+
+        if (Test-Path -LiteralPath $ArchivePath) {
+            Write-Log "${Description}: фінальний архів уже існує і буде замінений після успішної перевірки: $ArchivePath" -Level "WARNING"
+            Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction Stop
+        }
+
+        if (Test-Path -LiteralPath "$ArchivePath.sha512") {
+            Remove-Item -LiteralPath "$ArchivePath.sha512" -Force -ErrorAction SilentlyContinue
+        }
+
+        Move-Item -LiteralPath $tempArchivePath -Destination $ArchivePath -Force -ErrorAction Stop
+
+        if (-not (Test-Path -LiteralPath $ArchivePath)) {
+            throw "Final archive was not found after move: $ArchivePath"
+        }
+
+        Write-Log "${Description}: архів перевірено та перенесено в основне сховище: $ArchivePath" -Level "SUCCESS"
+        return $true
+    }
+    catch {
+        $errorMsg = "${Description}: помилка verified-архівації: $($_.Exception.Message)"
+        Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+        Send-SlackAlert -Message $errorMsg -IsCritical
+        Remove-BravoSafeTempArchive -Path $tempArchivePath
+        $global:criticalErrorOccurred = $true
+        return $false
+    }
+}
+# <<< BRAVO_VERIFIED_ARCHIVE END
+
 # Функція обробки лог-файлів
 function Process-Logs {
     param(
@@ -2435,10 +2691,14 @@ function Compress-OldData {
         
         try {
             Write-Log "Архівація: $dirName -> $archiveName" -Level "INFO"
-            $arcArgs = $arcCommonParams + @("$archivePath", "$($dir.FullName)")
-            $exitCode = Invoke-CommandWithLog -Command $ARC_PATH -Arguments $arcArgs -Description "Архівація $dirName"
+            $archiveOk = New-BravoVerifiedArchive `
+                -ArchivePath $archivePath `
+                -SourcePath $dir.FullName `
+                -ArcCommonParams $arcCommonParams `
+                -ARC_PATH $ARC_PATH `
+                -Description "Архівація $dirName"
             
-            if ($exitCode -eq 0) {
+            if ($archiveOk) {
                 Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction Stop
                 $archivedCount++
                 Write-Log "[ІНФО] Архів $dirName успішно створено" -Level "SUCCESS"
@@ -3906,8 +4166,14 @@ if ($bravoStatus -ne "Running") {
             }
             
             # Архівація перед реставрацією
-            $arcArgs = $arcCommonParams + @("$ARC_DIR\$ARCH_NAME1", "$MODEL_PATH\*")
-            $exitCode = Invoke-CommandWithLog -Command $ARC_PATH -Arguments $arcArgs -Description "Архівація моделі перед реставрацією"
+            $archivePathBefore = "$ARC_DIR\$ARCH_NAME1"
+            $archiveCreatedBefore = New-BravoVerifiedArchive `
+                -ArchivePath $archivePathBefore `
+                -SourcePath "$MODEL_PATH\*" `
+                -ArcCommonParams $arcCommonParams `
+                -ARC_PATH $ARC_PATH `
+                -Description "Архівація моделі перед реставрацією"
+            $exitCode = if ($archiveCreatedBefore) { 0 } else { 1 }
             
             if ($exitCode -ne 0) {
                 $errorMsg = "Архівація моделі перед реставрацією не вдалася! Код помилки: $exitCode. Реставрація скасована."
@@ -3950,8 +4216,14 @@ if ($bravoStatus -ne "Running") {
                     
                     # Виконуємо архівацію після реставрації ЛИШЕ якщо не було критичних змін
                     if (-not $restoreRequired) {
-                        $arcArgs = $arcCommonParams + @("$ARC_DIR\$ARCH_NAME2", "$MODEL_PATH\*")
-                        $exitCode = Invoke-CommandWithLog -Command $ARC_PATH -Arguments $arcArgs -Description "Архівація моделі після реставрації"
+                        $archivePathAfter = "$ARC_DIR\$ARCH_NAME2"
+                        $archiveCreatedAfter = New-BravoVerifiedArchive `
+                            -ArchivePath $archivePathAfter `
+                            -SourcePath "$MODEL_PATH\*" `
+                            -ArcCommonParams $arcCommonParams `
+                            -ARC_PATH $ARC_PATH `
+                            -Description "Архівація моделі після реставрації"
+                        $exitCode = if ($archiveCreatedAfter) { 0 } else { 1 }
                         if ($exitCode -eq 0) {
                             Write-Log -Message "Архів моделі після реставрації створено -> $ARC_DIR\$ARCH_NAME2" -Level "SUCCESS"
                             $null = Verify-Backup -ArchivePath "$ARC_DIR\$ARCH_NAME2"

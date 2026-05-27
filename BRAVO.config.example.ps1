@@ -70,25 +70,27 @@
     # Allowed values: "DEBUG", "INFO", "WARNING", "ERROR", "SUCCESS"
     LogLevel = "INFO"
 
-SevenZipArchiveArgs = @(
-    'a',
-    '-mmt',
-    '-mx6',
-    '-r',
-    '-y',
-    '-ssw',
-    '-bb0',
-    '-scrcSHA256',
-    '-aoa'
-)
+    SevenZipArchiveArgs = @(
+        'a',
+        '-mmt',
+        '-mx6',
+        '-r',
+        '-y',
+        '-ssw',
+        '-bb0',
+        '-scrcSHA256',
+        '-aoa'
+    )
 
-SevenZipExtractArgs = @(
-    'x',
-    '-y'
-)
+    SevenZipExtractArgs = @(
+        'x',
+        '-y'
+    )
 
     ArchivePasswordEnabled = "on"
-ArchivePassword = ""
+    ArchivePasswordEncryptHeaders = "on"
+    ArchiveTempDir = "{ROOT_LIMS}\ARCHIV\TEMP"
+    ArchivePassword = ""
     ArchivePasswordCredentialTarget = "BRAVO/ArchivePassword"
 
 }
