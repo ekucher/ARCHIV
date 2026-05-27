@@ -9,8 +9,6 @@
 
     # Archive and restore
     ArchivePrefix = "example_prefix"
-    ArchivePassword = ""
-
     RestoreDay = 7
     RestoreTime = "23:00"
     ArchiveRetentionDays = 14
@@ -36,4 +34,24 @@
     # Logging
     # Allowed values: "DEBUG", "INFO", "WARNING", "ERROR", "SUCCESS"
     LogLevel = "INFO"
+
+SevenZipArchiveArgs = @(
+    'a',
+    '-mmt',
+    '-mx6',
+    '-r',
+    '-y',
+    '-ssw',
+    '-bb0',
+    '-scrcSHA256',
+    '-aoa'
+)
+
+SevenZipExtractArgs = @(
+    'x',
+    '-y'
+)
+
+ArchivePassword = ""
+    
 }

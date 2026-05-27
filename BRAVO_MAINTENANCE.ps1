@@ -80,6 +80,14 @@ $ExchangAPIProcessName = [string](Get-BravoConfigValue -Name "ExchangAPIProcessN
 $ArchivePrefix = [string](Get-BravoConfigValue -Name "ArchivePrefix" -Default "")
 $ArchivePassword = [string](Get-BravoConfigValue -Name "ArchivePassword" -Required)
 
+$SevenZipArchiveArgs = @(
+    Get-BravoConfigValue -Name "SevenZipArchiveArgs" -Required
+)
+
+$SevenZipExtractArgs = @(
+    Get-BravoConfigValue -Name "SevenZipExtractArgs" -Required
+)
+
 $RestoreDay = [int](Get-BravoConfigValue -Name "RestoreDay" -Default 7)
 $RestoreTime = [string](Get-BravoConfigValue -Name "RestoreTime" -Default "23:00")
 
@@ -156,18 +164,7 @@ $ApacheService = Get-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
 $ApacheServiceExists = ($ApacheService -ne $null)
 
 # Archiver parameters
-$arcCommonParams = @(
-    'a',
-    '-mmt4',
-    '-mx6',
-    '-r',
-    '-y',
-    '-ssw',
-    '-bb0',
-    '-scrcSHA256',
-    '-aoa',
-    "-p$ArchivePassword"
-)
+$arcCommonParams = @($SevenZipArchiveArgs) + @("-p$ArchivePassword")
 
 # ===== GLOBAL RUNTIME VARIABLES =====
 $global:ScriptStartTime = [DateTime]::Now
@@ -637,11 +634,9 @@ function Restore-FromArchive {
         return 1
     }
 
-    $extractParams = @(
-        'x',
+    $extractParams = @($SevenZipExtractArgs) + @(
         "-o$Destination",
         "-p$ArchivePassword",
-        "-y",
         $ArchivePath
     )
     
