@@ -1506,7 +1506,7 @@ if ($exchangAPIService) {
     $serviceStatus = $exchangAPIService.Status
     if ($serviceStatus -eq 'Running') {
         Write-Log -Message "Зупинка служби $ExchangAPIServiceName..." -Level "INFO"
-        Stop-Service -Name $BravoServiceName -Force -WarningAction SilentlyContinue
+        Stop-Service -Name $ExchangAPIServiceName -Force -WarningAction SilentlyContinue
         
         $waitTime = 30
         $startTime = Get-Date
