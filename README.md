@@ -298,3 +298,54 @@ Behavior:
 - `-IgnoreProgress` starts without resuming the previous state.
 - Manual runs ask before continuing an unfinished state.
 - Scheduler runs can auto-resume when `ProgressStateAutoResumeForScheduler = "on"`.
+
+## Health checks
+
+The script can verify disk free space and the freshness/integrity of the latest archives.
+
+Configuration example:
+
+```powershell
+HealthCheckEnabled = "on"
+HealthCheckOnlyFailExitCode = "on"
+HealthCheckArchiveMaxAgeHours = 2
+HealthCheckMinFreeSpaceGB = 10
+HealthCheckDrives = @("C:")
+HealthCheckArchiveCategories = @(
+    @{
+        Name = "LIMS"
+        Path = "{ARC_DIR}"
+        Pattern = "{ArchivePrefix}_*.mdz"
+        Exclude = @(
+            "{ArchivePrefix}_blog_*.mdz",
+            "{ArchivePrefix}_bravoexch_*.mdz",
+            "{ArchivePrefix}_before_*.mdz",
+            "{ArchivePrefix}_after_*.mdz"
+        )
+    },
+    @{
+        Name = "BLOG"
+        Path = "{ARC_DIR}"
+        Pattern = "{ArchivePrefix}_blog_*.mdz"
+    },
+    @{
+        Name = "BRAVOEXCH"
+        Path = "{ARC_DIR}"
+        Pattern = "{ArchivePrefix}_bravoexch_*.mdz"
+    }
+)
+```
+
+Run only health checks without stopping services:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -HealthCheckOnly
+```
+
+Skip health checks for a maintenance run:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -SkipHealthCheck
+```
+
+When problems are found, the script sends a Slack message with disk-space problems, latest archive age, archive size, and SHA512 status.

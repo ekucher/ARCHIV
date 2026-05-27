@@ -6,6 +6,7 @@ LOGS/
 Trace/
 exchangAPI/
 LIMS/
+Modules/
 
 # Тимчасові файли
 tmp/

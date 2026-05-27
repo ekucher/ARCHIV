@@ -32,10 +32,37 @@
     ProgressStateEnabled = "on"
     ProgressStateMaxAgeHours = 72
     ProgressStateAutoResumeForScheduler = "on"
+    # Health checks
+    HealthCheckEnabled = "on"
+    HealthCheckOnlyFailExitCode = "on"
+    HealthCheckArchiveMaxAgeHours = 2
+    HealthCheckMinFreeSpaceGB = 10
+    HealthCheckDrives = @("C:")
+    HealthCheckArchiveCategories = @(
+    @{
+        Name = "LIMS"
+        Path = "{ROOT_LIMS}\ARCHIV\LIMS"
+        Pattern = "{ArchivePrefix}_*.mdz"
+        Exclude = @(
+            "{ArchivePrefix}_before_*.mdz",
+            "{ArchivePrefix}_after_*.mdz"
+        )
+    },
+    @{
+        Name = "BLOG"
+        Path = "{ROOT_LIMS}\ARCHIV\BLOG"
+        Pattern = "{ArchivePrefix}_blog_*.mdz"
+    },
+    @{
+        Name = "BRAVOEXCH"
+        Path = "{ROOT_LIMS}\ARCHIV\BRAVOEXCH"
+        Pattern = "{ArchivePrefix}_bravoexch_*.mdz"
+    }
+    )
 
     # Slack
     # Allowed values: "none", "errors_only", "all"
-    SlackMode = "errors_only"
+    SlackMode = "all"
     SlackWebhookUrl = ""
     SlackWebhookCredentialTarget = "BRAVO/SlackWebhookUrl"
 
