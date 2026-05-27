@@ -33,7 +33,7 @@
     # Allowed values: "none", "errors_only", "all"
     SlackMode = "errors_only"
     SlackWebhookUrl = ""
-SlackWebhookCredentialTarget = "BRAVO/SlackWebhookUrl"
+    SlackWebhookCredentialTarget = "BRAVO/SlackWebhookUrl"
 
     # Logging
     # Allowed values: "DEBUG", "INFO", "WARNING", "ERROR", "SUCCESS"
@@ -56,7 +56,7 @@ SevenZipExtractArgs = @(
     '-y'
 )
 
-ArchivePassword = ""
-ArchivePasswordCredentialTarget = "BRAVO/ArchivePassword"
+    ArchivePassword = ""
+    ArchivePasswordCredentialTarget = "BRAVO/ArchivePassword"
 
 }
