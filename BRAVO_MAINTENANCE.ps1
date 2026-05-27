@@ -350,7 +350,8 @@ function Get-BravoSecret {
 function Invoke-BravoCredentialSetup {
     param(
         [string]$ArchivePasswordTarget = "BRAVO/ArchivePassword",
-        [string]$SlackWebhookTarget = "BRAVO/SlackWebhookUrl"
+        [string]$SlackWebhookTarget = "BRAVO/SlackWebhookUrl",
+        [string]$SlackMode = "errors_only"
     )
 
     Write-Host "Saving BRAVO secrets to Windows Credential Manager for current Windows user: $env:USERDOMAIN\$env:USERNAME" -ForegroundColor Cyan
@@ -362,12 +363,31 @@ function Invoke-BravoCredentialSetup {
         -UserName "BRAVO" `
         -Prompt "Archive password"
 
-    $saveSlack = Read-Host "Save Slack webhook URL? Type YES to save"
-    if ($saveSlack -eq "YES") {
-        Save-BravoSecretInteractive `
-            -Target $SlackWebhookTarget `
-            -UserName "BRAVO" `
-            -Prompt "Slack webhook URL"
+    $normalizedSlackMode = if ([string]::IsNullOrWhiteSpace($SlackMode)) {
+        "none"
+    }
+    else {
+        $SlackMode.ToLowerInvariant()
+    }
+
+    $slackEnabled = ($normalizedSlackMode -notin @("none", "off"))
+
+    if ($slackEnabled) {
+        Write-Host "SlackMode is '$SlackMode'. Slack webhook URL should be saved for notifications." -ForegroundColor Cyan
+        $saveSlack = Read-Host "Save or replace Slack webhook URL now? Type YES to save"
+
+        if ($saveSlack -eq "YES") {
+            Save-BravoSecretInteractive `
+                -Target $SlackWebhookTarget `
+                -UserName "BRAVO" `
+                -Prompt "Slack webhook URL"
+        }
+        else {
+            Write-Warning "SlackMode is '$SlackMode', but Slack webhook URL was not saved. Slack will be disabled at runtime if the URL is missing."
+        }
+    }
+    else {
+        Write-Host "SlackMode is '$SlackMode'. Slack webhook URL prompt skipped." -ForegroundColor Yellow
     }
 
     Write-Host "Credentials saved." -ForegroundColor Green
@@ -1106,10 +1126,15 @@ $ArchivePrefix = [string](Get-BravoConfigValue -Name "ArchivePrefix" -Default ""
 $ArchivePasswordCredentialTarget = [string](Get-BravoConfigValue -Name "ArchivePasswordCredentialTarget" -Default "BRAVO/ArchivePassword")
 $SlackWebhookCredentialTarget = [string](Get-BravoConfigValue -Name "SlackWebhookCredentialTarget" -Default "BRAVO/SlackWebhookUrl")
 
+# Slack mode is needed before -SetupCredentials so the setup wizard can decide
+# whether Slack webhook URL should be requested.
+$SlackMode = [string](Get-BravoConfigValue -Name "SlackMode" -Default "errors_only")
+
 if ($SetupCredentials) {
     Invoke-BravoCredentialSetup `
         -ArchivePasswordTarget $ArchivePasswordCredentialTarget `
-        -SlackWebhookTarget $SlackWebhookCredentialTarget
+        -SlackWebhookTarget $SlackWebhookCredentialTarget `
+        -SlackMode $SlackMode
     exit 0
 }
 
@@ -1133,7 +1158,7 @@ $ArchivePassword = [string](Get-BravoSecret `
     -ConfigValue $ArchivePasswordConfigValue `
     -Required)
 
-$SlackMode = [string](Get-BravoConfigValue -Name "SlackMode" -Default "errors_only")
+# SlackMode loaded earlier before -SetupCredentials
 $SlackWebhookUrlConfigValue = [string](Get-BravoConfigValue -Name "SlackWebhookUrl" -Default "")
 $SlackWebhookUrl = [string](Get-BravoSecret `
     -Name "SlackWebhookUrl" `
@@ -1178,6 +1203,9 @@ $global:LogLevel = $LogLevel
 
 # Disable Slack automatically if webhook URL is empty
 if ([string]::IsNullOrWhiteSpace($SlackWebhookUrl)) {
+    if ($SlackMode.ToLowerInvariant() -notin @("none", "off")) {
+        Write-Warning "SlackMode is '$SlackMode', but SlackWebhookUrl is empty or not found in Windows Credential Manager. Slack will be disabled."
+    }
     $SlackMode = "none"
 }
 
