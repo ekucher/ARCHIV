@@ -1165,6 +1165,62 @@ $SlackWebhookUrl = [string](Get-BravoSecret `
     -Target $SlackWebhookCredentialTarget `
     -ConfigValue $SlackWebhookUrlConfigValue)
 
+# If Slack is enabled but webhook URL is missing, offer to save it during an interactive manual run.
+$normalizedSlackModeRuntime = if ([string]::IsNullOrWhiteSpace($SlackMode)) {
+    "none"
+}
+else {
+    $SlackMode.ToLowerInvariant()
+}
+
+$slackEnabledRuntime = ($normalizedSlackModeRuntime -notin @("none", "off"))
+
+if ($slackEnabledRuntime -and [string]::IsNullOrWhiteSpace($SlackWebhookUrl)) {
+    $canPromptForSlackWebhook = $true
+
+    try {
+        if ([Console]::IsInputRedirected) {
+            $canPromptForSlackWebhook = $false
+        }
+    }
+    catch {
+        $canPromptForSlackWebhook = $false
+    }
+
+    if (-not [Environment]::UserInteractive) {
+        $canPromptForSlackWebhook = $false
+    }
+
+    # Do not prompt when running under the dedicated scheduler user.
+    if ($env:USERNAME -ieq $TaskUserName) {
+        $canPromptForSlackWebhook = $false
+    }
+
+    if ($canPromptForSlackWebhook) {
+        Write-Warning "SlackMode is '$SlackMode', but Slack webhook URL is not saved in Windows Credential Manager and is empty in config."
+        $saveSlackRuntime = Read-Host "Save Slack webhook URL now? Type YES to save"
+
+        if ($saveSlackRuntime -eq "YES") {
+            Save-BravoSecretInteractive `
+                -Target $SlackWebhookCredentialTarget `
+                -UserName "BRAVO" `
+                -Prompt "Slack webhook URL"
+
+            $slackCredential = Get-BravoWindowsCredential -Target $SlackWebhookCredentialTarget
+            if ($slackCredential -and -not [string]::IsNullOrWhiteSpace($slackCredential.Secret)) {
+                $SlackWebhookUrl = [string]$slackCredential.Secret
+                Write-Host "Slack webhook URL saved and loaded for current run." -ForegroundColor Green
+            }
+        }
+        else {
+            Write-Warning "Slack webhook URL was not saved. Slack will be disabled for this run."
+        }
+    }
+    else {
+        Write-Warning "SlackMode is '$SlackMode', but Slack webhook URL is missing and this run is non-interactive or running as scheduler user '$TaskUserName'. Run .\BRAVO_MAINTENANCE.ps1 -SetupCredentials interactively or reinstall the task with credential bootstrap."
+    }
+}
+
 $SevenZipArchiveArgs = @(
     Get-BravoConfigValue -Name "SevenZipArchiveArgs" -Required
 )
