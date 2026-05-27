@@ -18,7 +18,7 @@
     MinFreeSpaceGB = 10
     MaxMdFileSizeGB = 1.5
     ExcludedMdSizeCheckFiles = @(
-    "ExampleLargeFile.md"
+        "ExampleLargeFile.md"
     )
 
     # Paths
