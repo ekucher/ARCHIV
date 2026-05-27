@@ -279,21 +279,26 @@ function Write-Log {
     }
     
     # Звичайні повідомлення
-    if ($NoTimestamp) {
-        $logEntry = $Message
-        Write-Host $logEntry -ForegroundColor White
-    } else {
-        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        $logEntry = "[$timestamp] [$Level] $Message"
-        
-        switch ($Level) {
-            "SUCCESS" { Write-Host $logEntry -ForegroundColor Green }
-            "ERROR"   { Write-Host $logEntry -ForegroundColor Red }
-            "WARNING" { Write-Host $logEntry -ForegroundColor Yellow }
-            "DEBUG"   { Write-Host $logEntry -ForegroundColor Gray }
-            default   { Write-Host $logEntry -ForegroundColor White }
-        }
-    }
+if ($NoTimestamp) {
+    $logEntry = $Message
+    $consoleEntry = $Message
+} else {
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+    # У файл пишемо повний запис з timestamp і level
+    $logEntry = "[$timestamp] [$Level] $Message"
+
+    # У консоль пишемо тільки текст повідомлення без timestamp/level
+    $consoleEntry = $Message
+}
+
+switch ($Level) {
+    "SUCCESS" { Write-Host $consoleEntry -ForegroundColor Green }
+    "ERROR"   { Write-Host $consoleEntry -ForegroundColor Red }
+    "WARNING" { Write-Host $consoleEntry -ForegroundColor Yellow }
+    "DEBUG"   { Write-Host $consoleEntry -ForegroundColor Gray }
+    default   { Write-Host $consoleEntry -ForegroundColor White }
+}
     
     try {
         if (-not (Test-Path $LOG_DIR)) {
