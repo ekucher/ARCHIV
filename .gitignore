@@ -1,0 +1,53 @@
+# Логи
+*.log
+logs/
+Logs/
+
+# Тимчасові файли
+tmp/
+temp/
+*.tmp
+*.bak
+*.old
+
+# PowerShell debug / transcript
+PowerShell_transcript.*
+*.trace
+
+# Локальні налаштування
+*.local.ps1
+*.secrets.ps1
+.env
+.env.*
+!.env.example
+
+# Credentials / ключі / сертифікати
+*credential*
+*credentials*
+*.key
+*.pem
+*.pfx
+*.cer
+
+# Архіви / пакети
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+
+# Windows / IDE
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+*.Credentials.ps1
+BRAVO.Credentials.ps1
+BRAVO.config.local.ps1
+BRAVO.config.ps1
+LOGS/
+Trace/
+exchangAPI/
+LIMS/
+
