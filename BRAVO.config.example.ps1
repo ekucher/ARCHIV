@@ -56,7 +56,8 @@ SevenZipExtractArgs = @(
     '-y'
 )
 
-    ArchivePassword = ""
+    ArchivePasswordEnabled = "on"
+ArchivePassword = ""
     ArchivePasswordCredentialTarget = "BRAVO/ArchivePassword"
 
 }

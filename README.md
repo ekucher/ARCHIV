@@ -245,3 +245,22 @@ Skip this bootstrap only when you intentionally manage credentials for the sched
 ```powershell
 .\BRAVO_MAINTENANCE.ps1 -InstallScheduledTask -TaskTime 23:00 -TaskDaysOfWeek Sunday -AddTaskUserToAdministrators -SkipTaskUserCredentialBootstrap
 ```
+
+### Archive password mode
+
+Archive password protection is controlled by:
+
+```powershell
+ArchivePasswordEnabled = "on"
+ArchivePassword = ""
+ArchivePasswordCredentialTarget = "BRAVO/ArchivePassword"
+```
+
+Allowed values:
+
+| Value | Behavior |
+| --- | --- |
+| `on` | Archives are created with `-p<password>`. The password is read from Windows Credential Manager or local config fallback during migration. |
+| `off` | Archives are created without a password, and archive password prompts are skipped. |
+
+When `ArchivePasswordEnabled = "on"` and the password is missing, an interactive manual run offers to save it to Windows Credential Manager. Non-interactive runs and scheduler runs fail fast instead of creating an unencrypted archive by accident.

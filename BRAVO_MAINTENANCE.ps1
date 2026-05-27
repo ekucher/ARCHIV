@@ -351,17 +351,35 @@ function Invoke-BravoCredentialSetup {
     param(
         [string]$ArchivePasswordTarget = "BRAVO/ArchivePassword",
         [string]$SlackWebhookTarget = "BRAVO/SlackWebhookUrl",
-        [string]$SlackMode = "errors_only"
+        [string]$SlackMode = "errors_only",
+        [string]$ArchivePasswordEnabled = "on"
     )
 
     Write-Host "Saving BRAVO secrets to Windows Credential Manager for current Windows user: $env:USERDOMAIN\$env:USERNAME" -ForegroundColor Cyan
     Write-Host "Important: Windows Credential Manager credentials are per Windows user." -ForegroundColor Yellow
     Write-Host "If the scheduled task runs as another user, save these secrets under that same user account." -ForegroundColor Yellow
 
-    Save-BravoSecretInteractive `
-        -Target $ArchivePasswordTarget `
-        -UserName "BRAVO" `
-        -Prompt "Archive password"
+    $normalizedArchivePasswordEnabled = if ([string]::IsNullOrWhiteSpace($ArchivePasswordEnabled)) {
+        "on"
+    }
+    else {
+        $ArchivePasswordEnabled.ToLowerInvariant()
+    }
+
+    if ($normalizedArchivePasswordEnabled -notin @("on", "off")) {
+        throw "ArchivePasswordEnabled must be 'on' or 'off'. Current value: $ArchivePasswordEnabled"
+    }
+
+    if ($normalizedArchivePasswordEnabled -eq "on") {
+        Write-Host "ArchivePasswordEnabled is 'on'. Archive password should be saved for encrypted archives." -ForegroundColor Cyan
+        Save-BravoSecretInteractive `
+            -Target $ArchivePasswordTarget `
+            -UserName "BRAVO" `
+            -Prompt "Archive password"
+    }
+    else {
+        Write-Host "ArchivePasswordEnabled is 'off'. Archive password prompt skipped." -ForegroundColor Yellow
+    }
 
     $normalizedSlackMode = if ([string]::IsNullOrWhiteSpace($SlackMode)) {
         "none"
@@ -696,8 +714,9 @@ function Invoke-BravoTaskUserCredentialBootstrap {
         [Parameter(Mandatory = $true)]
         [string]$ArchivePasswordTarget,
 
-        [Parameter(Mandatory = $true)]
-        [string]$ArchivePasswordSecret,
+        [string]$ArchivePasswordEnabled = "on",
+
+        [string]$ArchivePasswordSecret = "",
 
         [Parameter(Mandatory = $true)]
         [string]$SlackWebhookTarget,
@@ -711,8 +730,19 @@ function Invoke-BravoTaskUserCredentialBootstrap {
         throw "Administrator rights are required to bootstrap task-user credentials."
     }
 
-    if ([string]::IsNullOrWhiteSpace($ArchivePasswordSecret)) {
-        throw "ArchivePasswordSecret is empty. Run -SetupCredentials first or keep ArchivePassword in local config during migration."
+    $normalizedArchivePasswordEnabled = if ([string]::IsNullOrWhiteSpace($ArchivePasswordEnabled)) {
+        "on"
+    }
+    else {
+        $ArchivePasswordEnabled.ToLowerInvariant()
+    }
+
+    if ($normalizedArchivePasswordEnabled -notin @("on", "off")) {
+        throw "ArchivePasswordEnabled must be 'on' or 'off'. Current value: $ArchivePasswordEnabled"
+    }
+
+    if ($normalizedArchivePasswordEnabled -eq "on" -and [string]::IsNullOrWhiteSpace($ArchivePasswordSecret)) {
+        throw "ArchivePasswordSecret is empty while ArchivePasswordEnabled is 'on'. Run -SetupCredentials first or keep ArchivePassword in local config during migration."
     }
 
     $bootstrapId = [guid]::NewGuid().ToString("N")
@@ -749,6 +779,7 @@ function Invoke-BravoTaskUserCredentialBootstrap {
         Set-Acl -LiteralPath $bootstrapRoot -AclObject $acl
 
         $payload = [PSCustomObject]@{
+            ArchivePasswordEnabled = $normalizedArchivePasswordEnabled
             ArchivePasswordTarget = $ArchivePasswordTarget
             ArchivePasswordSecret = $ArchivePasswordSecret
             SlackWebhookTarget = $SlackWebhookTarget
@@ -880,12 +911,24 @@ try {
 
     $payload = Get-Content -LiteralPath $PayloadPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
-    Save-BravoWindowsCredentialBootstrap `
-        -Target $payload.ArchivePasswordTarget `
-        -UserName "BRAVO" `
-        -Secret $payload.ArchivePasswordSecret
+    $archivePasswordEnabled = if ([string]::IsNullOrWhiteSpace([string]$payload.ArchivePasswordEnabled)) {
+        "on"
+    }
+    else {
+        ([string]$payload.ArchivePasswordEnabled).ToLowerInvariant()
+    }
 
-    Write-BootstrapLog "Archive password credential saved."
+    if ($archivePasswordEnabled -eq "on") {
+        Save-BravoWindowsCredentialBootstrap `
+            -Target $payload.ArchivePasswordTarget `
+            -UserName "BRAVO" `
+            -Secret $payload.ArchivePasswordSecret
+
+        Write-BootstrapLog "Archive password credential saved."
+    }
+    else {
+        Write-BootstrapLog "Archive password disabled by config. Skipped."
+    }
 
     if (-not [string]::IsNullOrWhiteSpace([string]$payload.SlackWebhookSecret)) {
         Save-BravoWindowsCredentialBootstrap `
@@ -983,6 +1026,9 @@ catch {
 
 function Install-BravoScheduledTask {
     param(
+        [string]$ArchivePasswordEnabled = "on",
+
+
         [string]$TaskName = "BRAVO Maintenance",
 
         [string]$TaskPath = "\BRAVO\",
@@ -1024,16 +1070,27 @@ function Install-BravoScheduledTask {
         -ResetPassword:$ResetTaskUserPassword `
         -AddToAdministrators:$AddTaskUserToAdministrators
 
+    $normalizedArchivePasswordEnabledForTask = if ([string]::IsNullOrWhiteSpace($ArchivePasswordEnabled)) {
+        "on"
+    }
+    else {
+        $ArchivePasswordEnabled.ToLowerInvariant()
+    }
+
+    if ($normalizedArchivePasswordEnabledForTask -notin @("on", "off")) {
+        throw "ArchivePasswordEnabled must be 'on' or 'off'. Current value: $ArchivePasswordEnabled"
+    }
+
     # Bootstrap task-user Windows Credential Manager secrets.
     if (-not $SkipTaskUserCredentialBootstrap) {
-        if ([string]::IsNullOrWhiteSpace($ArchivePasswordSecret)) {
+        if ($normalizedArchivePasswordEnabledForTask -eq "on" -and [string]::IsNullOrWhiteSpace($ArchivePasswordSecret)) {
             $archiveCredential = Get-BravoWindowsCredential -Target $ArchivePasswordCredentialTarget
             if ($archiveCredential -and -not [string]::IsNullOrWhiteSpace($archiveCredential.Secret)) {
                 $ArchivePasswordSecret = [string]$archiveCredential.Secret
             }
         }
 
-        if ([string]::IsNullOrWhiteSpace($ArchivePasswordSecret)) {
+        if ($normalizedArchivePasswordEnabledForTask -eq "on" -and [string]::IsNullOrWhiteSpace($ArchivePasswordSecret)) {
             try {
                 $ArchivePasswordSecret = [string](Get-BravoConfigValue -Name "ArchivePassword" -Default "")
             }
@@ -1061,6 +1118,7 @@ function Install-BravoScheduledTask {
         Invoke-BravoTaskUserCredentialBootstrap `
             -TaskUserName $TaskUserName `
             -TaskUserPassword $password `
+            -ArchivePasswordEnabled $normalizedArchivePasswordEnabledForTask `
             -ArchivePasswordTarget $ArchivePasswordCredentialTarget `
             -ArchivePasswordSecret $ArchivePasswordSecret `
             -SlackWebhookTarget $SlackWebhookCredentialTarget `
@@ -1126,6 +1184,16 @@ $ArchivePrefix = [string](Get-BravoConfigValue -Name "ArchivePrefix" -Default ""
 $ArchivePasswordCredentialTarget = [string](Get-BravoConfigValue -Name "ArchivePasswordCredentialTarget" -Default "BRAVO/ArchivePassword")
 $SlackWebhookCredentialTarget = [string](Get-BravoConfigValue -Name "SlackWebhookCredentialTarget" -Default "BRAVO/SlackWebhookUrl")
 
+# Archive password mode is needed before -SetupCredentials so the setup wizard can decide
+# whether archive password should be requested according to BRAVO.config.ps1.
+$ArchivePasswordEnabled = [string](Get-BravoConfigValue -Name "ArchivePasswordEnabled" -Default "on")
+$ArchivePasswordEnabled = if ([string]::IsNullOrWhiteSpace($ArchivePasswordEnabled)) { "on" } else { $ArchivePasswordEnabled.ToLowerInvariant() }
+
+if ($ArchivePasswordEnabled -notin @("on", "off")) {
+    Write-Host "ERROR: ArchivePasswordEnabled must be 'on' or 'off'. Current value: $ArchivePasswordEnabled" -ForegroundColor Red
+    exit 1
+}
+
 # Slack mode is needed before -SetupCredentials so the setup wizard can decide
 # whether Slack webhook URL should be requested.
 $SlackMode = [string](Get-BravoConfigValue -Name "SlackMode" -Default "errors_only")
@@ -1134,7 +1202,8 @@ if ($SetupCredentials) {
     Invoke-BravoCredentialSetup `
         -ArchivePasswordTarget $ArchivePasswordCredentialTarget `
         -SlackWebhookTarget $SlackWebhookCredentialTarget `
-        -SlackMode $SlackMode
+        -SlackMode $SlackMode `
+        -ArchivePasswordEnabled $ArchivePasswordEnabled
     exit 0
 }
 
@@ -1147,16 +1216,70 @@ if ($InstallScheduledTask) {
         -ScriptArguments "" `
         -AddTaskUserToAdministrators:$AddTaskUserToAdministrators `
         -ResetTaskUserPassword:$ResetTaskUserPassword `
-        -SkipTaskUserCredentialBootstrap:$SkipTaskUserCredentialBootstrap
+        -SkipTaskUserCredentialBootstrap:$SkipTaskUserCredentialBootstrap `
+        -ArchivePasswordEnabled $ArchivePasswordEnabled
     exit 0
 }
 
 $ArchivePasswordConfigValue = [string](Get-BravoConfigValue -Name "ArchivePassword" -Default "")
-$ArchivePassword = [string](Get-BravoSecret `
-    -Name "ArchivePassword" `
-    -Target $ArchivePasswordCredentialTarget `
-    -ConfigValue $ArchivePasswordConfigValue `
-    -Required)
+$ArchivePassword = ""
+
+if ($ArchivePasswordEnabled -eq "on") {
+    $ArchivePassword = [string](Get-BravoSecret `
+        -Name "ArchivePassword" `
+        -Target $ArchivePasswordCredentialTarget `
+        -ConfigValue $ArchivePasswordConfigValue)
+
+    if ([string]::IsNullOrWhiteSpace($ArchivePassword)) {
+        $canPromptForArchivePassword = $true
+
+        try {
+            if ([Console]::IsInputRedirected) {
+                $canPromptForArchivePassword = $false
+            }
+        }
+        catch {
+            $canPromptForArchivePassword = $false
+        }
+
+        if (-not [Environment]::UserInteractive) {
+            $canPromptForArchivePassword = $false
+        }
+
+        # Do not prompt when running under the dedicated scheduler user.
+        if ($env:USERNAME -ieq $TaskUserName) {
+            $canPromptForArchivePassword = $false
+        }
+
+        if ($canPromptForArchivePassword) {
+            Write-Warning "ArchivePasswordEnabled is 'on', but archive password is not saved in Windows Credential Manager and is empty in config."
+            $saveArchivePasswordRuntime = Read-Host "Save archive password now? Type YES to save"
+
+            if ($saveArchivePasswordRuntime -eq "YES") {
+                Save-BravoSecretInteractive `
+                    -Target $ArchivePasswordCredentialTarget `
+                    -UserName "BRAVO" `
+                    -Prompt "Archive password"
+
+                $archiveCredential = Get-BravoWindowsCredential -Target $ArchivePasswordCredentialTarget
+                if ($archiveCredential -and -not [string]::IsNullOrWhiteSpace($archiveCredential.Secret)) {
+                    $ArchivePassword = [string]$archiveCredential.Secret
+                    Write-Host "Archive password saved and loaded for current run." -ForegroundColor Green
+                }
+            }
+        }
+        else {
+            throw "ArchivePasswordEnabled is 'on', but archive password is missing and this run is non-interactive or running as scheduler user '$TaskUserName'. Run .\BRAVO_MAINTENANCE.ps1 -SetupCredentials interactively or reinstall the task with credential bootstrap."
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ArchivePassword)) {
+        throw "ArchivePasswordEnabled is 'on', but archive password was not provided. Archive creation cannot continue."
+    }
+}
+else {
+    Write-Host "ArchivePasswordEnabled is 'off'. Archives will be created without password." -ForegroundColor Yellow
+}
 
 # SlackMode loaded earlier before -SetupCredentials
 $SlackWebhookUrlConfigValue = [string](Get-BravoConfigValue -Name "SlackWebhookUrl" -Default "")
@@ -1311,7 +1434,10 @@ $ApacheService = Get-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
 $ApacheServiceExists = ($ApacheService -ne $null)
 
 # Archiver parameters
-$arcCommonParams = @($SevenZipArchiveArgs) + @("-p$ArchivePassword")
+$arcCommonParams = @($SevenZipArchiveArgs)
+if ($ArchivePasswordEnabled -eq "on" -and -not [string]::IsNullOrWhiteSpace($ArchivePassword)) {
+    $arcCommonParams += "-p$ArchivePassword"
+}
 
 # ===== GLOBAL RUNTIME VARIABLES =====
 $global:ScriptStartTime = [DateTime]::Now
