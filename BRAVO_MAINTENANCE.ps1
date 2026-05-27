@@ -1506,7 +1506,7 @@ if ($exchangAPIService) {
     $serviceStatus = $exchangAPIService.Status
     if ($serviceStatus -eq 'Running') {
         Write-Log -Message "Зупинка служби $ExchangAPIServiceName..." -Level "INFO"
-        Stop-Service -Name $ExchangAPIServiceName -Force
+        Stop-Service -Name $BravoServiceName -Force -WarningAction SilentlyContinue
         
         $waitTime = 30
         $startTime = Get-Date
@@ -1568,7 +1568,7 @@ try {
                 }
             }
             
-            Stop-Service -Name $BravoServiceName -Force
+            Stop-Service -Name $BravoServiceName -Force -WarningAction SilentlyContinue
             
             $timeout = 30
             $serviceStatus = (Get-Service -Name $BravoServiceName).Status
@@ -1786,7 +1786,7 @@ Write-Log -Message "=== ЗАПУСК СЛУЖБ ==="
 try {
     if ($bravoService -and (Get-Service -Name $BravoServiceName).Status -ne 'Running') {
         Write-Log -Message "Запуск служби $BravoServiceName..." -Level "INFO"
-        Start-Service -Name $BravoServiceName
+        Start-Service -Name $BravoServiceName -WarningAction SilentlyContinue
         
         $timeout = 60
         $serviceStatus = (Get-Service -Name $BravoServiceName).Status
@@ -1818,7 +1818,7 @@ if ($exchangAPIService) {
     $serviceStatus = (Get-Service -Name $ExchangAPIServiceName).Status
     if ($serviceStatus -ne 'Running') {
         Write-Log -Message "Запуск служби $ExchangAPIServiceName..." -Level "INFO"
-        Start-Service -Name $ExchangAPIServiceName
+        Start-Service -Name $ExchangAPIServiceName -WarningAction SilentlyContinue
         
         $waitTime = 30
         $startTime = Get-Date
