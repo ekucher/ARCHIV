@@ -11,56 +11,151 @@ param (
     [switch]$DisableSizeCheck,
     [switch]$EnableAllSlack,
     [switch]$DisableAllSlack,
+
+    [ValidateSet("on", "off")]
     [string]$AutoShutdown,
+
+    [ValidateSet("on", "off")]
     [string]$ArchivLims
 )
 
-# ===== ЗАВАНТАЖЕННЯ ЛОКАЛЬНОЇ КОНФІГУРАЦІЇ =====
+# ===== LOAD LOCAL CONFIG =====
 $configPath = Join-Path -Path $PSScriptRoot -ChildPath "BRAVO.config.ps1"
 
 if (-not (Test-Path $configPath)) {
-    throw "Не знайдено BRAVO.config.ps1. Створи його з BRAVO.config.example.ps1"
+    throw "BRAVO.config.ps1 not found. Create it from BRAVO.config.example.ps1"
 }
 
 . $configPath
 
 if (-not $global:BravoConfig) {
-    throw "BRAVO.config.ps1 завантажено, але `$global:BravoConfig не визначено"
+    throw "BRAVO.config.ps1 loaded, but global BravoConfig is not defined"
 }
 
-$ArchivePassword = $global:BravoConfig.ArchivePassword
+function Get-BravoConfigValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
 
-if ([string]::IsNullOrWhiteSpace($ArchivePassword)) {
-    throw "ArchivePassword не задано у BRAVO.config.ps1"
+        [object]$Default = $null,
+
+        [switch]$Required
+    )
+
+    $value = $null
+    $hasValue = $false
+
+    if ($global:BravoConfig -is [hashtable]) {
+        if ($global:BravoConfig.ContainsKey($Name)) {
+            $value = $global:BravoConfig[$Name]
+            $hasValue = $true
+        }
+    }
+    else {
+        $property = $global:BravoConfig.PSObject.Properties[$Name]
+        if ($property) {
+            $value = $property.Value
+            $hasValue = $true
+        }
+    }
+
+    if ($hasValue -and $null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+        return $value
+    }
+
+    if ($Required) {
+        throw "Required config value is missing: $Name"
+    }
+
+    return $Default
 }
 
-# За потреби запит на підвищення дозволу виконання скрипта
-If (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
-	Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-	Exit
+# ===== SETTINGS FROM BRAVO.config.ps1 =====
+$global:ObjectName = [string](Get-BravoConfigValue -Name "ObjectName" -Default "")
+
+$BravoServiceName = [string](Get-BravoConfigValue -Name "BravoServiceName" -Default "BRAVO")
+$ExchangAPIServiceName = [string](Get-BravoConfigValue -Name "ExchangAPIServiceName" -Default "exchangAPI")
+$ExchangAPIProcessName = [string](Get-BravoConfigValue -Name "ExchangAPIProcessName" -Default "exchangAPI")
+
+$ArchivePrefix = [string](Get-BravoConfigValue -Name "ArchivePrefix" -Default "")
+$ArchivePassword = [string](Get-BravoConfigValue -Name "ArchivePassword" -Required)
+
+$RestoreDay = [int](Get-BravoConfigValue -Name "RestoreDay" -Default 7)
+$RestoreTime = [string](Get-BravoConfigValue -Name "RestoreTime" -Default "23:00")
+
+$ARCHIVE_RETENTION_DAYS = [int](Get-BravoConfigValue -Name "ArchiveRetentionDays" -Default 14)
+$RESTORE_ARCHIVES_KEEP_COUNT = [int](Get-BravoConfigValue -Name "RestoreArchivesKeepCount" -Default 1)
+$LOG_RETENTION_DAYS = [int](Get-BravoConfigValue -Name "LogRetentionDays" -Default 180)
+
+$MIN_FREE_SPACE = [double](Get-BravoConfigValue -Name "MinFreeSpaceGB" -Default 10)
+
+$MaxMdFileSizeGB = [double](Get-BravoConfigValue -Name "MaxMdFileSizeGB" -Default 1.5)
+$MAX_MD_FILE_SIZE = [int64]($MaxMdFileSizeGB * 1GB)
+
+$BRAVO_WEB_DIR = [string](Get-BravoConfigValue -Name "BravoWebDir" -Default "D:\Br-a-vo.web")
+
+$AutoShutdownDefault = [string](Get-BravoConfigValue -Name "AutoShutdown" -Default "off")
+$ShutdownTimeout = [int](Get-BravoConfigValue -Name "ShutdownTimeout" -Default 60)
+
+$ArchivLimsDefault = [string](Get-BravoConfigValue -Name "ArchivLims" -Default "off")
+
+$SlackMode = [string](Get-BravoConfigValue -Name "SlackMode" -Default "errors_only")
+$SlackWebhookUrl = [string](Get-BravoConfigValue -Name "SlackWebhookUrl" -Default "")
+
+$LogLevel = [string](Get-BravoConfigValue -Name "LogLevel" -Default "INFO")
+$global:LogLevel = $LogLevel
+
+# Disable Slack automatically if webhook URL is empty
+if ([string]::IsNullOrWhiteSpace($SlackWebhookUrl)) {
+    $SlackMode = "none"
+}
+
+# Command line parameters override config values
+if ($PSBoundParameters.ContainsKey("AutoShutdown") -and -not [string]::IsNullOrWhiteSpace($AutoShutdown)) {
+    $AutoShutdown = $AutoShutdown.ToLower()
+}
+else {
+    $AutoShutdown = $AutoShutdownDefault.ToLower()
+}
+
+if ($AutoShutdown -notin @("on", "off")) {
+    Write-Host "ERROR: AutoShutdown must be 'on' or 'off'. Current value: $AutoShutdown" -ForegroundColor Red
+    exit 1
+}
+
+$script:EnableAutoShutdown = ($AutoShutdown -eq "on")
+
+if ($PSBoundParameters.ContainsKey("ArchivLims") -and -not [string]::IsNullOrWhiteSpace($ArchivLims)) {
+    $ArchivLims = $ArchivLims.ToLower()
+}
+else {
+    $ArchivLims = $ArchivLimsDefault.ToLower()
+}
+
+if ($ArchivLims -notin @("on", "off")) {
+    Write-Host "ERROR: ArchivLims must be 'on' or 'off'. Current value: $ArchivLims" -ForegroundColor Red
+    exit 1
+}
+
+$script:EnableArchivLims = ($ArchivLims -eq "on")
+
+# Elevate to administrator if needed
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit
 }
 
 # Enforce modern security protocol
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# Очистка терміналу
-clear
+# Clear console
+Clear-Host
 
-# Перевірка наявності служби Apache в системі
+# Apache service detection
 $ApacheService = Get-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
 $ApacheServiceExists = ($ApacheService -ne $null)
 
-# ===== НАЛАШТУВАННЯ АВТОМАТИЧНОГО ВИМКНЕННЯ =====
-$AutoShutdown = "off"  # НАЛАШТУВАННЯ: "on" - ввімкнено, "off" - вимкнено
-$ShutdownTimeout = 60
-
-$ArchivLims = "off"  # Можливі значення: "on" - запускати ARCHIV_LIMS, "off" - не запускати
-
-# ===== НАЛАШТУВАННЯ SLACK =====
-$SlackMode = "errors_only"  # Можливі значення: "none", "errors_only", "all"
-$SlackWebhookUrl = ""
-
-# Параметри архіватора (змінювати лише за необхідності)
+# Archiver parameters
 $arcCommonParams = @(
     'a',
     '-mmt4',
@@ -74,10 +169,7 @@ $arcCommonParams = @(
     "-p$ArchivePassword"
 )
 
-# ===== НАЛАШТУВАННЯ ЛОГУВАННЯ =====
-$LogLevel = "INFO"  # Можливі значента: "DEBUG", "INFO", "WARNING", "ERROR", "SUCCESS"
-
-# ===== ГЛОБАЛЬНІ ЗМІННІ (НЕ ЗМІНЮВАТИ) =====
+# ===== GLOBAL RUNTIME VARIABLES =====
 $global:ScriptStartTime = [DateTime]::Now
 $global:SlackMessageBuffer = [System.Collections.Generic.List[string]]::new()
 $global:CriticalErrors = $false
