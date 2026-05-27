@@ -28,6 +28,10 @@
     AutoShutdown = "off"
     ShutdownTimeout = 60
     ArchivLims = "off"
+    # Progress / power-loss recovery
+    ProgressStateEnabled = "on"
+    ProgressStateMaxAgeHours = 72
+    ProgressStateAutoResumeForScheduler = "on"
 
     # Slack
     # Allowed values: "none", "errors_only", "all"

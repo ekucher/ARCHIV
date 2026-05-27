@@ -30,7 +30,11 @@ param (
 
     [switch]$AddTaskUserToAdministrators,
     [switch]$ResetTaskUserPassword,
-    [switch]$SkipTaskUserCredentialBootstrap
+    [switch]$SkipTaskUserCredentialBootstrap,
+
+    [switch]$ResetProgress,
+    [switch]$IgnoreProgress,
+    [switch]$ShowProgressState
 )
 
 # ===== LOAD LOCAL CONFIG =====
@@ -83,6 +87,360 @@ function Get-BravoConfigValue {
 
     return $Default
 }
+
+# >>> BRAVO_PROGRESS_STATE BEGIN
+# --------------------------------
+# Progress state / power-loss recovery
+# --------------------------------
+
+function ConvertTo-BravoNormalizedSwitch {
+    param(
+        [object]$Value,
+        [string]$Default = "on"
+    )
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        return $Default.ToLowerInvariant()
+    }
+
+    return ([string]$Value).ToLowerInvariant()
+}
+
+function Read-BravoProgressState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StatePath
+    )
+
+    if (-not (Test-Path -LiteralPath $StatePath)) {
+        return $null
+    }
+
+    try {
+        return Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        Write-Warning "Could not read progress state '$StatePath': $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Save-BravoProgressState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$State
+    )
+
+    if (-not $script:BravoProgressStateEnabled) {
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($script:BravoProgressStatePath)) {
+        return
+    }
+
+    $stateDir = Split-Path -Parent $script:BravoProgressStatePath
+    if (-not (Test-Path -LiteralPath $stateDir)) {
+        New-Item -Path $stateDir -ItemType Directory -Force | Out-Null
+    }
+
+    $State.UpdatedAt = (Get-Date).ToString("o")
+
+    $json = $State | ConvertTo-Json -Depth 12
+    $tmpPath = "$script:BravoProgressStatePath.tmp"
+
+    $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($tmpPath, $json, $utf8Bom)
+
+    Move-Item -LiteralPath $tmpPath -Destination $script:BravoProgressStatePath -Force
+}
+
+function New-BravoProgressState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+
+        [hashtable]$Metadata = @{}
+    )
+
+    return [PSCustomObject]@{
+        SchemaVersion  = 1
+        RunId          = $RunId
+        Status         = "Running"
+        StartedAt      = (Get-Date).ToString("o")
+        UpdatedAt      = (Get-Date).ToString("o")
+        ResumeCount    = 0
+        CurrentStep    = $null
+        CompletedSteps = @()
+        Metadata       = $Metadata
+        Host           = $env:COMPUTERNAME
+        User           = "$env:USERDOMAIN\$env:USERNAME"
+        ProcessId      = $PID
+    }
+}
+
+function Get-BravoCompletedStepIds {
+    if (-not $script:BravoProgressState -or -not $script:BravoProgressState.CompletedSteps) {
+        return @()
+    }
+
+    return @($script:BravoProgressState.CompletedSteps) |
+        Where-Object { $_ -and $_.Id } |
+        ForEach-Object { [string]$_.Id }
+}
+
+function Test-BravoProgressStepCompleted {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StepId
+    )
+
+    return ((Get-BravoCompletedStepIds) -contains $StepId)
+}
+
+function Set-BravoProgressStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StepId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$StepName
+    )
+
+    if (-not $script:BravoProgressStateEnabled -or -not $script:BravoProgressState) {
+        return
+    }
+
+    $script:BravoProgressState.Status = "Running"
+    $script:BravoProgressState.CurrentStep = [PSCustomObject]@{
+        Id        = $StepId
+        Name      = $StepName
+        StartedAt = (Get-Date).ToString("o")
+    }
+
+    Save-BravoProgressState -State $script:BravoProgressState
+
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Message "Checkpoint START: $StepId - $StepName" -Level "DEBUG"
+    }
+}
+
+function Complete-BravoProgressStep {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StepId,
+
+        [string]$StepName = "",
+
+        [hashtable]$Metadata = @{}
+    )
+
+    if (-not $script:BravoProgressStateEnabled -or -not $script:BravoProgressState) {
+        return
+    }
+
+    if (-not (Test-BravoProgressStepCompleted -StepId $StepId)) {
+        $completed = @($script:BravoProgressState.CompletedSteps)
+        $completed += [PSCustomObject]@{
+            Id          = $StepId
+            Name        = $StepName
+            CompletedAt = (Get-Date).ToString("o")
+            Metadata    = $Metadata
+        }
+
+        $script:BravoProgressState.CompletedSteps = $completed
+    }
+
+    if ($script:BravoProgressState.CurrentStep -and $script:BravoProgressState.CurrentStep.Id -eq $StepId) {
+        $script:BravoProgressState.CurrentStep = $null
+    }
+
+    Save-BravoProgressState -State $script:BravoProgressState
+
+    if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+        Write-Log -Message "Checkpoint DONE: $StepId" -Level "DEBUG"
+    }
+}
+
+function Close-BravoProgressState {
+    param(
+        [ValidateSet("Completed", "CompletedWithErrors", "Interrupted")]
+        [string]$Status = "Completed"
+    )
+
+    if (-not $script:BravoProgressStateEnabled -or -not $script:BravoProgressState) {
+        return
+    }
+
+    $script:BravoProgressState.Status = $Status
+    $script:BravoProgressState.CurrentStep = $null
+    $script:BravoProgressState.FinishedAt = (Get-Date).ToString("o")
+
+    Save-BravoProgressState -State $script:BravoProgressState
+}
+
+function Show-BravoProgressState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StatePath
+    )
+
+    $state = Read-BravoProgressState -StatePath $StatePath
+
+    if (-not $state) {
+        Write-Host "Progress state not found: $StatePath" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Progress state: $StatePath" -ForegroundColor Cyan
+    Write-Host "RunId:   $($state.RunId)"
+    Write-Host "Status:  $($state.Status)"
+    Write-Host "Started: $($state.StartedAt)"
+    Write-Host "Updated: $($state.UpdatedAt)"
+    Write-Host "User:    $($state.User)"
+    Write-Host "Host:    $($state.Host)"
+
+    if ($state.CurrentStep) {
+        Write-Host "Current step: $($state.CurrentStep.Id) - $($state.CurrentStep.Name)" -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    Write-Host "Completed steps:" -ForegroundColor Cyan
+
+    foreach ($step in @($state.CompletedSteps)) {
+        if ($step) {
+            Write-Host (" - {0} [{1}]" -f $step.Id, $step.CompletedAt)
+        }
+    }
+
+    if ($state.Metadata) {
+        Write-Host ""
+        Write-Host "Metadata:" -ForegroundColor Cyan
+        $state.Metadata | Format-List
+    }
+}
+
+function Initialize-BravoProgressState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StatePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RunId,
+
+        [hashtable]$Metadata = @{},
+
+        [string]$Enabled = "on",
+
+        [int]$MaxAgeHours = 72,
+
+        [string]$AutoResumeForScheduler = "on",
+
+        [string]$TaskUserName = "BRAVO_Scheduler",
+
+        [switch]$Reset,
+
+        [switch]$Ignore
+    )
+
+    $script:BravoProgressStateEnabled = ((ConvertTo-BravoNormalizedSwitch -Value $Enabled -Default "on") -eq "on")
+    $script:BravoProgressStatePath = $StatePath
+    $script:BravoProgressStateWasResumed = $false
+
+    if (-not $script:BravoProgressStateEnabled) {
+        $script:BravoProgressState = $null
+        return
+    }
+
+    $stateDir = Split-Path -Parent $StatePath
+    if (-not (Test-Path -LiteralPath $stateDir)) {
+        New-Item -Path $stateDir -ItemType Directory -Force | Out-Null
+    }
+
+    if ($Reset -and (Test-Path -LiteralPath $StatePath)) {
+        $archiveDir = Join-Path $stateDir "reset"
+        New-Item -Path $archiveDir -ItemType Directory -Force | Out-Null
+
+        $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        Move-Item -LiteralPath $StatePath -Destination (Join-Path $archiveDir "BRAVO_MAINTENANCE_STATE_$stamp.json") -Force
+        Write-Host "Previous progress state moved to reset archive." -ForegroundColor Yellow
+    }
+
+    $existingState = $null
+    if (-not $Ignore) {
+        $existingState = Read-BravoProgressState -StatePath $StatePath
+    }
+
+    if ($existingState -and $existingState.Status -in @("Running", "Interrupted")) {
+        $stateAgeHours = 0
+        try {
+            $stateAgeHours = ((Get-Date) - [DateTime]::Parse($existingState.UpdatedAt)).TotalHours
+        }
+        catch {
+            $stateAgeHours = 0
+        }
+
+        $isFreshEnough = ($MaxAgeHours -le 0 -or $stateAgeHours -le $MaxAgeHours)
+        $isSchedulerUser = ($env:USERNAME -ieq $TaskUserName)
+        $autoResume = ((ConvertTo-BravoNormalizedSwitch -Value $AutoResumeForScheduler -Default "on") -eq "on")
+
+        if ($isFreshEnough) {
+            $resume = $false
+
+            if ($isSchedulerUser -and $autoResume) {
+                $resume = $true
+                Write-Host "Unfinished progress state found. Scheduler user will resume automatically." -ForegroundColor Yellow
+            }
+            elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+                Write-Host "Unfinished progress state found:" -ForegroundColor Yellow
+                Write-Host "  RunId: $($existingState.RunId)"
+                Write-Host "  Status: $($existingState.Status)"
+                Write-Host "  CurrentStep: $($existingState.CurrentStep.Id) - $($existingState.CurrentStep.Name)"
+                Write-Host "  UpdatedAt: $($existingState.UpdatedAt)"
+                $answer = Read-Host "Continue with this progress state? Type YES to continue, RESET to archive it and start fresh"
+
+                if ($answer -eq "YES") {
+                    $resume = $true
+                }
+                elseif ($answer -eq "RESET") {
+                    $archiveDir = Join-Path $stateDir "reset"
+                    New-Item -Path $archiveDir -ItemType Directory -Force | Out-Null
+                    $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+                    Move-Item -LiteralPath $StatePath -Destination (Join-Path $archiveDir "BRAVO_MAINTENANCE_STATE_$stamp.json") -Force
+                    $existingState = $null
+                }
+                else {
+                    throw "Progress state exists and was not resumed. Use -ResetProgress or -IgnoreProgress if needed."
+                }
+            }
+            else {
+                throw "Unfinished progress state exists and this run is non-interactive. Use -ResetProgress, -IgnoreProgress, or enable ProgressStateAutoResumeForScheduler."
+            }
+
+            if ($resume) {
+                $script:BravoProgressState = $existingState
+                $script:BravoProgressState.Status = "Running"
+                $script:BravoProgressState.ResumeCount = [int]($script:BravoProgressState.ResumeCount) + 1
+                $script:BravoProgressState.ProcessId = $PID
+                $script:BravoProgressStateWasResumed = $true
+                Save-BravoProgressState -State $script:BravoProgressState
+                return
+            }
+        }
+        else {
+            $archiveDir = Join-Path $stateDir "stale"
+            New-Item -Path $archiveDir -ItemType Directory -Force | Out-Null
+            $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            Move-Item -LiteralPath $StatePath -Destination (Join-Path $archiveDir "BRAVO_MAINTENANCE_STATE_$stamp.json") -Force
+            Write-Host "Stale progress state moved to archive." -ForegroundColor Yellow
+        }
+    }
+
+    $script:BravoProgressState = New-BravoProgressState -RunId $RunId -Metadata $Metadata
+    Save-BravoProgressState -State $script:BravoProgressState
+}
+# <<< BRAVO_PROGRESS_STATE END
+
 
 # >>> BRAVO_SCHEDULER_CREDENTIALS_ADDON BEGIN
 # ==============================================================================
@@ -1197,6 +1555,10 @@ if ($ArchivePasswordEnabled -notin @("on", "off")) {
 # Slack mode is needed before -SetupCredentials so the setup wizard can decide
 # whether Slack webhook URL should be requested.
 $SlackMode = [string](Get-BravoConfigValue -Name "SlackMode" -Default "errors_only")
+# Progress state / power-loss recovery
+$ProgressStateEnabled = [string](Get-BravoConfigValue -Name "ProgressStateEnabled" -Default "on")
+$ProgressStateMaxAgeHours = [int](Get-BravoConfigValue -Name "ProgressStateMaxAgeHours" -Default 72)
+$ProgressStateAutoResumeForScheduler = [string](Get-BravoConfigValue -Name "ProgressStateAutoResumeForScheduler" -Default "on")
 
 if ($SetupCredentials) {
     Invoke-BravoCredentialSetup `
@@ -2769,6 +3131,56 @@ $ARCH_NAME2 = "${ArchivePrefix}_after_$NOW.mdz"
 $LOG_FILE = "$LOG_DIR\script_log_$NOW.txt"
 $SIZES_FILE = "$LOG_DIR\file_sizes_before_$NOW.csv"
 $TRACE_ARCHIV_DIR = "$TRACE_DIR\$YYYY-$MM-$DD"
+# Progress state / power-loss recovery
+$STATE_DIR = "$ROOT_LIMS\ARCHIV\STATE"
+$PROGRESS_STATE_FILE = Join-Path -Path $STATE_DIR -ChildPath "BRAVO_MAINTENANCE_STATE.json"
+
+$progressMetadata = @{
+    NOW = $NOW
+    YYYY = $YYYY
+    MM = $MM
+    DD = $DD
+    ARCH_NAME1 = $ARCH_NAME1
+    ARCH_NAME2 = $ARCH_NAME2
+    LOG_FILE = $LOG_FILE
+    SIZES_FILE = $SIZES_FILE
+    TRACE_ARCHIV_DIR = $TRACE_ARCHIV_DIR
+    MARKER_FILE = $MARKER_FILE
+    ROOT_LIMS = $ROOT_LIMS
+}
+
+if ($ShowProgressState) {
+    Show-BravoProgressState -StatePath $PROGRESS_STATE_FILE
+    exit 0
+}
+
+Initialize-BravoProgressState `
+    -StatePath $PROGRESS_STATE_FILE `
+    -RunId $NOW `
+    -Metadata $progressMetadata `
+    -Enabled $ProgressStateEnabled `
+    -MaxAgeHours $ProgressStateMaxAgeHours `
+    -AutoResumeForScheduler $ProgressStateAutoResumeForScheduler `
+    -TaskUserName $TaskUserName `
+    -Reset:$ResetProgress `
+    -Ignore:$IgnoreProgress
+
+if ($script:BravoProgressStateWasResumed -and $script:BravoProgressState.Metadata) {
+    $resumeMetadata = $script:BravoProgressState.Metadata
+
+    if ($resumeMetadata.NOW) { $NOW = [string]$resumeMetadata.NOW }
+    if ($resumeMetadata.YYYY) { $YYYY = [string]$resumeMetadata.YYYY }
+    if ($resumeMetadata.MM) { $MM = [string]$resumeMetadata.MM }
+    if ($resumeMetadata.DD) { $DD = [string]$resumeMetadata.DD }
+    if ($resumeMetadata.ARCH_NAME1) { $ARCH_NAME1 = [string]$resumeMetadata.ARCH_NAME1 }
+    if ($resumeMetadata.ARCH_NAME2) { $ARCH_NAME2 = [string]$resumeMetadata.ARCH_NAME2 }
+    if ($resumeMetadata.LOG_FILE) { $LOG_FILE = [string]$resumeMetadata.LOG_FILE }
+    if ($resumeMetadata.SIZES_FILE) { $SIZES_FILE = [string]$resumeMetadata.SIZES_FILE }
+    if ($resumeMetadata.TRACE_ARCHIV_DIR) { $TRACE_ARCHIV_DIR = [string]$resumeMetadata.TRACE_ARCHIV_DIR }
+    if ($resumeMetadata.MARKER_FILE) { $MARKER_FILE = [string]$resumeMetadata.MARKER_FILE }
+
+    Write-Host "Resuming maintenance progress RunId=$($script:BravoProgressState.RunId)" -ForegroundColor Yellow
+}
 
 # ===== СТВОРЕННЯ НЕОБХІДНИХ ДИРЕКТОРІЙ =====
 # ===== ПОЧАТОК ВИКОНАННЯ =====
@@ -2780,6 +3192,10 @@ Write-Log -Message "Коренева директорія: $ROOT_LIMS" -NoTimest
 Write-Log -Message "Дата: $($currentDate.ToString('yyyy-MM-dd'))" -NoTimestamp
 Write-Log -Message "Час: $($currentDate.ToString('HH:mm:ss'))" -NoTimestamp
 Write-Log -Message "Налаштування Slack: Режим $(switch ($script:SlackMode) {'none' {'ВИМКНЕНО'} 'errors_only' {'ЛИШЕ ПОМИЛКИ'} 'all' {'УСІ ПОВІДОМЛЕННЯ'}})" -NoTimestamp
+Write-Log -Message "Progress state file: $PROGRESS_STATE_FILE" -Level "DEBUG"
+if ($script:BravoProgressStateWasResumed) {
+    Write-Log -Message "Відновлення виконання після незавершеного запуску: RunId=$($script:BravoProgressState.RunId)" -Level "WARNING"
+}
 
 # Показуємо статус автоматичного вимкнення тільки якщо воно УВІМКНЕНО
 if ($script:EnableAutoShutdown) {
@@ -2799,7 +3215,7 @@ Write-Log -Message "Реставрація моделі: $(if ($shouldRestore) {
 Write-Log -Message "Перевірка розмірів файлів: $(if ($CheckSize) {'УВІМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
 Write-Log -Message "Умови: заданий день=$isRestoreDay, після $RestoreTime=$isAfterRestoreTime" -NoTimestamp
 Write-Log -Message "==="
-Write-Log -Message "=== ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ ==="
+Write-Log -Message "=== ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ ==="Set-BravoProgressStep -StepId "CHECK_FREE_SPACE" -StepName "Перевірка вільного місця"
 $spaceCheckResult = Check-FreeSpace -ROOT_LIMS $ROOT_LIMS
 
 # Перевірка критичних помилок після перевірки місця
@@ -2807,8 +3223,10 @@ if (-not $spaceCheckResult) {
     Write-Log -Message "Критична помилка перевірки місця. Завершення скрипта." -Level "ERROR"
     exit 1
 }
+Complete-BravoProgressStep -StepId "CHECK_FREE_SPACE" -StepName "Перевірка вільного місця"
 
 # ===== СТВОРЕННЯ НЕОБХІДНИХ ДИРЕКТОРІЙ =====
+Set-BravoProgressStep -StepId "CREATE_DIRECTORIES" -StepName "Створення необхідних директорій"
 # Перевіряємо, чи потрібно створювати будь-які директорії
 $dirsToCreate = @($TRACE_DIR, $ARC_DIR, $TRACE_ARCHIV_DIR, $EXCHANGAPI_ARCHIV_DIR)
 if ($ApacheServiceExists -and $ApacheEnabled) {
@@ -2846,9 +3264,10 @@ if ($missingDirs.Count -gt 0 -or $global:criticalErrorOccurred) {
     }
 }
 
+Complete-BravoProgressStep -StepId "CREATE_DIRECTORIES" -StepName "Створення необхідних директорій"
 # ===== ЗУПИНКА СЛУЖБ =====
 Write-Log -Message "==="
-Write-Log -Message "=== ЗУПИНКА СЛУЖБ ==="
+Write-Log -Message "=== ЗУПИНКА СЛУЖБ ==="Set-BravoProgressStep -StepId "STOP_SERVICES" -StepName "Зупинка служб"
 
 # 1. Зупинка Apache
 if ($ApacheServiceExists -and $ApacheEnabled) {
@@ -2989,11 +3408,14 @@ try {
     $global:criticalErrorOccurred = $true
 }
 
+Complete-BravoProgressStep -StepId "STOP_SERVICES" -StepName "Зупинка служб"
 # ===== ПЕРЕВІРКА РОЗМІРІВ ФАЙЛІВ .md =====
+Set-BravoProgressStep -StepId "CHECK_MD_FILE_SIZES" -StepName "Перевірка розмірів .md файлів"
 Check-MdFileSizes `
     -MODEL_PATH $MODEL_PATH `
     -MAX_MD_FILE_SIZE $MAX_MD_FILE_SIZE `
     -ExcludedFiles $ExcludedMdSizeCheckFiles
+Complete-BravoProgressStep -StepId "CHECK_MD_FILE_SIZES" -StepName "Перевірка розмірів .md файлів"
 
 # ===== ОПЕРАЦІЇ ПІСЛЯ ЗУПИНКИ СЕРВІСІВ =====
 $bravoStatus = if ($bravoService) { (Get-Service -Name $BravoServiceName).Status } else { 'Unknown' }
@@ -3002,6 +3424,7 @@ if ($bravoStatus -ne "Running") {
         try {
             Write-Log -Message "==="
             Write-Log -Message "=== РЕСТАВРАЦІЯ МОДЕЛІ ==="
+            Set-BravoProgressStep -StepId "RESTORE_MODEL" -StepName "Реставрація моделі"
             
             if ($CheckSize) {
                 Write-Log -Message "Збереження розмірів файлів перед реставрацією..." -Level "INFO"
@@ -3090,9 +3513,13 @@ if ($bravoStatus -ne "Running") {
             Send-SlackAlert -Message $errorMsg -IsCritical
             $global:criticalErrorOccurred = $true
         }
+        if (-not $global:criticalErrorOccurred) {
+            Complete-BravoProgressStep -StepId "RESTORE_MODEL" -StepName "Реставрація моделі"
+        }
     }
     
     # Обробка лог-файлів (об'єднаний етап)
+    Set-BravoProgressStep -StepId "PROCESS_LOG_FILES" -StepName "Обробка лог-файлів"
     try {
         Write-Log -Message "==="
         # Обробка trace-файлів
@@ -3158,6 +3585,10 @@ if ($bravoStatus -ne "Running") {
         Send-SlackAlert -Message $errorMsg
         $global:criticalErrorOccurred = $true
     }
+
+    if (-not $global:criticalErrorOccurred) {
+        Complete-BravoProgressStep -StepId "PROCESS_LOG_FILES" -StepName "Обробка лог-файлів"
+    }
 }
 else {
     $errorMsg = "Сервіс $($BravoServiceName) все ще працює. Операції з файлами пропущено."
@@ -3168,7 +3599,7 @@ else {
 
 # ===== ЗАПУСК СЕРВІСІВ =====
 Write-Log -Message "==="
-Write-Log -Message "=== ЗАПУСК СЛУЖБ ==="
+Write-Log -Message "=== ЗАПУСК СЛУЖБ ==="Set-BravoProgressStep -StepId "START_SERVICES" -StepName "Запуск служб"
 
 # 1. Запуск служби BRAVO
 try {
@@ -3277,7 +3708,8 @@ if ($ApacheServiceExists -and $ApacheEnabled) {
     }
 }
 
-# ===== ОЧИСТКА СТАРИХ ДАНИХ =====
+Complete-BravoProgressStep -StepId "START_SERVICES" -StepName "Запуск служб"
+# ===== ОЧИСТКА СТАРИХ ДАНИХ =====Set-BravoProgressStep -StepId "CLEANUP_OLD_DATA" -StepName "Очистка старих даних"
 # Перевіряємо, чи є що очищати
 $hasDataToClean = $false
 
@@ -3361,7 +3793,8 @@ if ($exchangAPIOldLogs.Count -gt 0) {
     Remove-OldLogFiles -Path $EXCHANGAPI_ARCHIV_DIR -RetentionDays $LOG_RETENTION_DAYS
 }
 
-# ===== ЗАПУСК ДОДАТКОВОГО СКРИПТУ ARCHIV_LIMS =====
+Complete-BravoProgressStep -StepId "CLEANUP_OLD_DATA" -StepName "Очистка старих даних"
+# ===== ЗАПУСК ДОДАТКОВОГО СКРИПТУ ARCHIV_LIMS =====Set-BravoProgressStep -StepId "ARCHIV_LIMS" -StepName "Запуск додаткового скрипту ARCHIV_LIMS"
 if ($script:EnableArchivLims) {
     Write-Log -Message "==="
     Write-Log -Message "=== ЗАПУСК СКРИПТУ ARCHIV_LIMS ==="
@@ -3404,6 +3837,7 @@ if ($script:EnableArchivLims) {
     Write-Log -Message "Запуск ARCHIV_LIMS: вимкнено" -Level "DEBUG"
 }
 
+Complete-BravoProgressStep -StepId "ARCHIV_LIMS" -StepName "Запуск додаткового скрипту ARCHIV_LIMS"
 # ===== ВИКЛИК ФУНКЦІЇ АВТОМАТИЧНОГО ВИМКНЕННЯ =====
 if ($script:EnableAutoShutdown) {
     Invoke-AutoShutdown -Timeout $ShutdownTimeout
@@ -3425,6 +3859,7 @@ Send-FinalReport -LOG_FILE $LOG_FILE
 $totalTime = (Get-Date) - $global:ScriptStartTime
 
 # ФІНАЛЬНИЙ БЛОК ЗАВЕРШЕННЯ
+Close-BravoProgressState -Status $(if ($global:criticalErrorOccurred) {"CompletedWithErrors"} else {"Completed"})
 Write-Log -Message "==="
 Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАВЕРШИЛА РОБОТУ ==="
 Write-Log -Message "=== УСТАНОВА: $($global:ObjectName) ==="

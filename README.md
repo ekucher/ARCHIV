@@ -264,3 +264,37 @@ Allowed values:
 | `off` | Archives are created without a password, and archive password prompts are skipped. |
 
 When `ArchivePasswordEnabled = "on"` and the password is missing, an interactive manual run offers to save it to Windows Credential Manager. Non-interactive runs and scheduler runs fail fast instead of creating an unencrypted archive by accident.
+
+## Progress state and power-loss recovery
+
+The maintenance script can save execution progress to a JSON state file:
+
+```text
+ARCHIV\STATE\BRAVO_MAINTENANCE_STATE.json
+```
+
+This helps after an emergency power outage: the next run can show the last active step and, for scheduler runs, continue with the same run metadata.
+
+Configuration:
+
+```powershell
+ProgressStateEnabled = "on"
+ProgressStateMaxAgeHours = 72
+ProgressStateAutoResumeForScheduler = "on"
+```
+
+Command-line options:
+
+```powershell
+.\BRAVO_MAINTENANCE.ps1 -ShowProgressState
+.\BRAVO_MAINTENANCE.ps1 -ResetProgress
+.\BRAVO_MAINTENANCE.ps1 -IgnoreProgress
+```
+
+Behavior:
+
+- `-ShowProgressState` prints the current saved state and exits.
+- `-ResetProgress` archives the previous state and starts a fresh run.
+- `-IgnoreProgress` starts without resuming the previous state.
+- Manual runs ask before continuing an unfinished state.
+- Scheduler runs can auto-resume when `ProgressStateAutoResumeForScheduler = "on"`.
