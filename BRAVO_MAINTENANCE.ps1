@@ -15,6 +15,25 @@ param (
     [string]$ArchivLims
 )
 
+# ===== ЗАВАНТАЖЕННЯ ЛОКАЛЬНОЇ КОНФІГУРАЦІЇ =====
+$configPath = Join-Path -Path $PSScriptRoot -ChildPath "BRAVO.config.ps1"
+
+if (-not (Test-Path $configPath)) {
+    throw "Не знайдено BRAVO.config.ps1. Створи його з BRAVO.config.example.ps1"
+}
+
+. $configPath
+
+if (-not $global:BravoConfig) {
+    throw "BRAVO.config.ps1 завантажено, але `$global:BravoConfig не визначено"
+}
+
+$ArchivePassword = $global:BravoConfig.ArchivePassword
+
+if ([string]::IsNullOrWhiteSpace($ArchivePassword)) {
+    throw "ArchivePassword не задано у BRAVO.config.ps1"
+}
+
 # За потреби запит на підвищення дозволу виконання скрипта
 If (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
 	Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
@@ -26,21 +45,6 @@ If (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
 
 # Очистка терміналу
 clear
-
-# ===== ГЛОБАЛЬНІ НАЛАШТУВАННЯ =====
-$global:ObjectName = ""                      # Глобальна змінна для назви об'єкта
-$BravoServiceName = "BRAVO"                  # Ім'я служби BravoService
-$ExchangAPIServiceName = "exchangAPI"        # Ім'я служби exchangAPI
-$ExchangAPIProcessName = "exchangAPI"        # Ім'я процесу (без .exe)
-$ArchivePrefix = ""                          # Префікс для архівів
-$RestoreDay = 7                              # День реставрації (Число 1-7)
-$RestoreTime = "23:00"                       # Час початку реставрації (HH:mm)
-$ARCHIVE_RETENTION_DAYS = 14                 # Зберігати архіви днів
-$RESTORE_ARCHIVES_KEEP_COUNT = 1             # ЗБЕРІГАТИ ОСТАННІХ ВЕРСІЙ АРХІВІВ РЕСТАВРАЦІЇ
-$LOG_RETENTION_DAYS = 180                    # Зберігати логи днів
-$MIN_FREE_SPACE = 10                         # Мінімальний вільний простір в GB без одиниць виміру
-$MAX_MD_FILE_SIZE = 1.5GB                    # Максимальний розмір .md файлу
-$BRAVO_WEB_DIR = "D:\Br-a-vo.web"            # Шлях до директорії Br-a-vo.web
 
 # Перевірка наявності служби Apache в системі
 $ApacheService = Get-Service -Name "Apache2.4" -ErrorAction SilentlyContinue
@@ -57,7 +61,18 @@ $SlackMode = "errors_only"  # Можливі значення: "none", "errors_o
 $SlackWebhookUrl = ""
 
 # Параметри архіватора (змінювати лише за необхідності)
-$arcCommonParams = @('a', '-mmt4', '-mx6', '-r', '-y', '-ssw', '-bb0', '-scrcSHA256', '-aoa', '-pP@ssw0rd')
+$arcCommonParams = @(
+    'a',
+    '-mmt4',
+    '-mx6',
+    '-r',
+    '-y',
+    '-ssw',
+    '-bb0',
+    '-scrcSHA256',
+    '-aoa',
+    "-p$ArchivePassword"
+)
 
 # ===== НАЛАШТУВАННЯ ЛОГУВАННЯ =====
 $LogLevel = "INFO"  # Можливі значента: "DEBUG", "INFO", "WARNING", "ERROR", "SUCCESS"
@@ -533,7 +548,7 @@ function Restore-FromArchive {
     $extractParams = @(
         'x',
         "-o$Destination",
-        "-pP@ssw0rd",
+        "-p$ArchivePassword",
         "-y",
         $ArchivePath
     )
