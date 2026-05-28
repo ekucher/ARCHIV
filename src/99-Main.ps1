@@ -263,7 +263,43 @@ $script:EnableArchivLims = ($ArchivLims -eq "on")
 
 # Elevate to administrator if needed
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
-    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    $elevatedArgs = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        $PSCommandPath
+    )
+
+    foreach ($parameterName in $PSBoundParameters.Keys) {
+        $parameterValue = $PSBoundParameters[$parameterName]
+
+        if ($parameterValue -is [System.Management.Automation.SwitchParameter]) {
+            if ($parameterValue.IsPresent) {
+                $elevatedArgs += "-$parameterName"
+            }
+
+            continue
+        }
+
+        if ($parameterValue -is [array]) {
+            foreach ($item in $parameterValue) {
+                $elevatedArgs += @("-$parameterName", [string]$item)
+            }
+
+            continue
+        }
+
+        if ($null -ne $parameterValue) {
+            $elevatedArgs += @("-$parameterName", [string]$parameterValue)
+        }
+    }
+
+    Start-Process -FilePath "powershell.exe" `
+        -ArgumentList $elevatedArgs `
+        -WorkingDirectory $PSScriptRoot `
+        -Verb RunAs
+
     exit
 }
 
