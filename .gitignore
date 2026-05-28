@@ -65,3 +65,7 @@ Desktop.ini
 
 # Keep source credentials module in Git
 !/src/30-Credentials.ps1
+
+# Generated monolith
+/BRAVO_MAINTENANCE.ps1
+/BRAVO_MAINTENANCE.ps1.sha512
