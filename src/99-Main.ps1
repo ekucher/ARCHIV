@@ -866,7 +866,7 @@ if ($bravoStatus -ne "Running") {
                 $csvData = $initialSizes | ConvertTo-Csv -NoTypeInformation
                 [System.IO.File]::WriteAllLines($SIZES_FILE, $csvData, $utf8NoBom)
                 
-                Write-Log -Message "До реставрації: розміри збережено -> $SIZES_FILE" -Level "SUCCESS"
+                Write-Log -Message "До реставрації: розміри збережено -> $([System.IO.Path]::GetFileName($SIZES_FILE))" -Level "SUCCESS"
             }
             
             # Архівація перед реставрацією
@@ -908,7 +908,7 @@ if ($bravoStatus -ne "Running") {
                 
                 # Перевірка контрольних сум після архівації (лише для before)
                 $null = Verify-Backup -ArchivePath "$ARC_DIR\$ARCH_NAME1"
-                Write-Log -Message "Архів до реставрації: створено, перевірено 7-Zip, SHA512 збережено -> $ARC_DIR\$ARCH_NAME1" -Level "SUCCESS"
+                Write-Log -Message "Архів до реставрації: створено, перевірено 7-Zip, SHA512 збережено -> $ARCH_NAME1" -Level "SUCCESS"
                 
                 # Виконання реставрації через bravocmd.exe (як в еталоні)
                 $restoreArgs = @("r", "null", "$ROOT_LIMS\MODEL\lims")
@@ -956,13 +956,13 @@ if ($bravoStatus -ne "Running") {
                         $exitCode = if ($archiveCreatedAfter) { 0 } else { 1 }
                         if ($exitCode -eq 0) {
                             $null = Verify-Backup -ArchivePath "$ARC_DIR\$ARCH_NAME2"
-                            Write-Log -Message "Архів після реставрації: створено, перевірено 7-Zip, SHA512 збережено -> $ARC_DIR\$ARCH_NAME2" -Level "SUCCESS"
+                            Write-Log -Message "Архів після реставрації: створено, перевірено 7-Zip, SHA512 збережено -> $ARCH_NAME2" -Level "SUCCESS"
                         }
                         
                         # Створення маркера ЛИШЕ при успішній реставрації без критичних змін
                         if ($createMarker -and -not $ForceRestore) {
                             Set-Content -Path $MARKER_FILE -Value "Реставрація виконана $NOW"
-                            Write-Log -Message "Маркер реставрації: створено -> $MARKER_FILE" -Level "SUCCESS"
+                            Write-Log -Message "Маркер реставрації: створено -> $([System.IO.Path]::GetFileName($MARKER_FILE))" -Level "SUCCESS"
                         }
 
                         Write-Log -Message "Статус реставрації: УСПІШНО" -Level "SUCCESS"
@@ -1335,6 +1335,7 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
 
 
 

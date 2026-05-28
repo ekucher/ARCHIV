@@ -50,7 +50,7 @@ function Invoke-Bravo7ZipSafe {
         [string]$Description
     )
 
-    Write-Log "$Description..." -Level "INFO"
+    Write-Log "$Description..." -Level "DEBUG"
 
     $maskedArgs = @()
     foreach ($arg in @($Arguments)) {
@@ -479,4 +479,5 @@ function Verify-Backup {
 
     return $valid
 }
+
 
