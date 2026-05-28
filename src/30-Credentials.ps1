@@ -1048,7 +1048,7 @@ function Install-BravoScheduledTask {
 
     $time = [DateTime]::ParseExact($At, "HH:mm", [Globalization.CultureInfo]::InvariantCulture)
 
-    $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    $argumentLine = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ScriptPath`""
     if (-not [string]::IsNullOrWhiteSpace($ScriptArguments)) {
         $argumentLine = "$argumentLine $ScriptArguments"
     }
