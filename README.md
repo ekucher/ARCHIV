@@ -44,6 +44,31 @@
 
 ---
 
+## Модульна структура `src`
+
+Проєкт розділений на модулі в директорії `src`. Фінальний монолітний скрипт збирається через `Build-BRAVO-Monolith.ps1` у директорію `dist`.
+
+| Модуль | Призначення |
+|---|---|
+| `05-Params.ps1` | Параметри запуску |
+| `10-Config.ps1` | Завантаження `BRAVO.config.ps1` і `Get-BravoConfigValue` |
+| `20-Logging.ps1` | Логування через `Write-Log` |
+| `30-Credentials.ps1` | Windows Credential Manager, секрети, scheduler user |
+| `40-Slack.ps1` | Slack webhook, Slack modes, фінальні повідомлення |
+| `50-ProgressState.ps1` | Progress-state і recovery після переривання |
+| `60-Files.ps1` | Робота з файлами, логами, cleanup, `.md` size checks |
+| `70-Archive.ps1` | 7-Zip, verified archives, restore, SHA512 |
+| `80-HealthCheck.ps1` | Health-check архівів, дисків і checksum-ів |
+| `90-System.ps1` | OS/system checks, free-space check, auto-shutdown, command runner |
+| `99-Main.ps1` | Orchestration runtime-сценарію без визначень функцій |
+
+Збірка:
+
+```powershell
+.\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
+
+---
+
 ## Структура runtime-директорій
 
 Типова структура в `C:\LIMS\ARCHIV`:
