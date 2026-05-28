@@ -401,38 +401,6 @@ function Check-MdFileSizes {
     }
 }
 
-function Test-MdFileExcluded {
-        param(
-            [System.IO.FileInfo]$File,
-            [string]$BasePath,
-            [string[]]$Patterns
-        )
-
-        if (-not $Patterns -or $Patterns.Count -eq 0) {
-            return $false
-        }
-
-        $baseFullPath = (Resolve-Path -LiteralPath $BasePath).Path.TrimEnd('\')
-        $fileFullPath = $File.FullName
-
-        if ($fileFullPath.StartsWith($baseFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-            $relativePath = $fileFullPath.Substring($baseFullPath.Length).TrimStart('\')
-        }
-        else {
-            $relativePath = $File.Name
-        }
-
-        $fileNameNormalized = $File.Name.Replace('/', '\').ToLowerInvariant()
-        $relativePathNormalized = $relativePath.Replace('/', '\').ToLowerInvariant()
-
-        foreach ($pattern in $Patterns) {
-            if ($fileNameNormalized -like $pattern -or $relativePathNormalized -like $pattern) {
-                return $true
-            }
-        }
-
-        return $false
-    }
 
 function Move-ExchangAPILogs {
     param(
