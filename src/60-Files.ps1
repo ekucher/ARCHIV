@@ -137,7 +137,7 @@ function Compare-FileSizes {
             
             return $true
         } else {
-            Write-Log "Змін в розмірах файлів не знайдено" -Level "INFO"
+            Write-Log "Змін в розмірах файлів не знайдено" -Level "DEBUG"
             return $false
         }
     }
@@ -446,3 +446,4 @@ function Move-ExchangAPILogs {
         return $false
     }
 }
+

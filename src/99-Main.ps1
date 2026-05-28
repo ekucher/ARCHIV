@@ -541,53 +541,96 @@ if ($script:BravoProgressStateWasResumed -and $script:BravoProgressState.Metadat
 
 # ===== СТВОРЕННЯ НЕОБХІДНИХ ДИРЕКТОРІЙ =====
 # ===== ПОЧАТОК ВИКОНАННЯ =====
-Write-Log -Message "==="
-Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАПУЩЕНА ==="
-Write-Log -Message "=== УСТАНОВА: $($global:ObjectName) ==="
-Write-Log -Message "==="
-Write-Log -Message "Коренева директорія: $ROOT_LIMS" -NoTimestamp
-Write-Log -Message "Дата: $($currentDate.ToString('yyyy-MM-dd'))" -NoTimestamp
-Write-Log -Message "Час: $($currentDate.ToString('HH:mm:ss'))" -NoTimestamp
-Write-Log -Message "Налаштування Slack: Режим $(switch ($script:SlackMode) {'none' {'ВИМКНЕНО'} 'errors_only' {'ЛИШЕ ПОМИЛКИ'} 'all' {'УСІ ПОВІДОМЛЕННЯ'}})" -NoTimestamp
+$slackModeText = switch ($script:SlackMode) {
+    "none" { "вимкнено" }
+    "errors_only" { "лише помилки" }
+    "all" { "усі повідомлення" }
+    default { $script:SlackMode }
+}
 
-if ($ExchangAPIServiceExists) {
-    Write-Log -Message "Наявність exchangAPI service: Увімкнено" -NoTimestamp
-
+$exchangAPIStatus = if ($ExchangAPIServiceExists) {
     if (-not [string]::IsNullOrWhiteSpace($ExchangAPIServiceWorkingDir)) {
-        Write-Log -Message "Робочий каталог exchangAPI: $ExchangAPIServiceWorkingDir" -NoTimestamp
+        "увімкнено ($ExchangAPIServiceWorkingDir)"
+    }
+    else {
+        "увімкнено"
     }
 }
 else {
-    Write-Log -Message "Наявність exchangAPI service: Вимкнено" -NoTimestamp
+    "вимкнено"
 }
+
+$apacheAutoDetected = $false
+$apacheExtraMessages = [System.Collections.Generic.List[string]]::new()
+
+if ($ApacheDetectionMessages -and $ApacheDetectionMessages.Count -gt 0) {
+    foreach ($apacheDetectionMessage in $ApacheDetectionMessages) {
+        if ($apacheDetectionMessage -like "Каталог Br-a-vo.web визначено автоматично:*") {
+            $apacheAutoDetected = $true
+        }
+        else {
+            $apacheExtraMessages.Add($apacheDetectionMessage) | Out-Null
+        }
+    }
+}
+
+$apacheStatus = if ($ApacheServiceExists) {
+    if ($ApacheEnabled) {
+        $apacheModeText = if ($apacheAutoDetected) { ", авто" } else { "" }
+
+        if (-not [string]::IsNullOrWhiteSpace($BRAVO_WEB_DIR)) {
+            "увімкнено ($BRAVO_WEB_DIR$apacheModeText)"
+        }
+        else {
+            "увімкнено"
+        }
+    }
+    else {
+        "вимкнено"
+    }
+}
+else {
+    "не встановлено"
+}
+
+$restoreMarkerText = if (Test-Path $MARKER_FILE) {
+    "; маркер сьогодні: $([System.IO.Path]::GetFileName($MARKER_FILE))"
+}
+else {
+    ""
+}
+
+$restoreStatus = if ($shouldRestore) {
+    "АКТИВОВАНА ($restoreReason$restoreMarkerText)"
+}
+else {
+    "ВИМКНЕНА$restoreMarkerText"
+}
+
+Write-Log -Message "==="
+Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАПУЩЕНА | $($global:ObjectName) ==="
+Write-Log -Message "==="
+Write-Log -Message "Корінь: $ROOT_LIMS | Дата/час: $($currentDate.ToString('yyyy-MM-dd HH:mm:ss')) | Slack: $slackModeText" -NoTimestamp
+Write-Log -Message "Служби: exchangAPI=$exchangAPIStatus | Apache=$apacheStatus" -NoTimestamp
+
+if ($apacheExtraMessages.Count -gt 0) {
+    foreach ($apacheDetectionMessage in $apacheExtraMessages) {
+        Write-Log -Message "Apache: $apacheDetectionMessage" -NoTimestamp
+    }
+}
+
 Write-Log -Message "Progress state file: $PROGRESS_STATE_FILE" -Level "DEBUG"
+
 if ($script:BravoProgressStateWasResumed) {
     Write-Log -Message "Відновлення виконання після незавершеного запуску: RunId=$($script:BravoProgressState.RunId)" -Level "WARNING"
 }
 
-# Показуємо статус автоматичного вимкнення тільки якщо воно УВІМКНЕНО
 if ($script:EnableAutoShutdown) {
     Write-Log -Message "Автоматичне вимкнення: УВІМКНЕНО" -NoTimestamp
 }
 
-# Відображаємо інформацію про Apache тільки якщо служба існує
-if ($ApacheServiceExists) {
-    Write-Log -Message "Наявність Apache: $(if ($ApacheEnabled) {'Увімкнено'} else {'Вимкнено'})" -NoTimestamp
-}
-
-if ($ApacheDetectionMessages -and $ApacheDetectionMessages.Count -gt 0) {
-    foreach ($apacheDetectionMessage in $ApacheDetectionMessages) {
-        Write-Log -Message $apacheDetectionMessage -NoTimestamp
-    }
-}
-
-if ($isRestoreDay -and $isAfterRestoreTime -and (Test-Path $MARKER_FILE)) {
-    Write-Log -Message "РЕСТАВРАЦІЯ СЬОГОДНІ ВЖЕ ВИКОНУВАЛАСЬ (знайдено маркер $([System.IO.Path]::GetFileName($MARKER_FILE)))" -Level "INFO"
-}
-
-Write-Log -Message "Реставрація моделі: $(if ($shouldRestore) {"АКТИВОВАНА ($restoreReason)"} else {"ВИМКНЕНА"})" -NoTimestamp
-Write-Log -Message "Перевірка розмірів файлів: $(if ($CheckSize) {'УВІМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
-Write-Log -Message "Умови: заданий день=$isRestoreDay, після $RestoreTime=$isAfterRestoreTime" -NoTimestamp
+Write-Log -Message "Реставрація: $restoreStatus" -NoTimestamp
+Write-Log -Message "Перевірки: розмір .md=$(if ($CheckSize) {'увімкнено'} else {'вимкнено'}) | Умови: день=$isRestoreDay, після $RestoreTime=$isAfterRestoreTime" -NoTimestamp
 if ($HealthCheckOnly) {
     $healthResult = Invoke-BravoHealthCheck -SendSlack
     Close-BravoProgressState -Status $(if ($healthResult.HasCriticalIssues) {"CompletedWithErrors"} else {"Completed"})
@@ -809,7 +852,7 @@ if ($bravoStatus -ne "Running") {
             Set-BravoProgressStep -StepId "RESTORE_MODEL" -StepName "Реставрація моделі"
             
             if ($CheckSize) {
-                Write-Log -Message "Збереження розмірів файлів перед реставрацією..." -Level "INFO"
+                Write-Log -Message "До реставрації: збереження розмірів файлів..." -Level "DEBUG"
                 $initialSizes = Get-ChildItem -Path $MODEL_PATH -Recurse -File | 
                     ForEach-Object {
                         [PSCustomObject]@{
@@ -823,7 +866,7 @@ if ($bravoStatus -ne "Running") {
                 $csvData = $initialSizes | ConvertTo-Csv -NoTypeInformation
                 [System.IO.File]::WriteAllLines($SIZES_FILE, $csvData, $utf8NoBom)
                 
-                Write-Log -Message "Розміри файлів збережено: $SIZES_FILE" -Level "SUCCESS"
+                Write-Log -Message "До реставрації: розміри збережено -> $SIZES_FILE" -Level "SUCCESS"
             }
             
             # Архівація перед реставрацією
@@ -862,28 +905,34 @@ if ($bravoStatus -ne "Running") {
                 Send-SlackAlert -Message $errorMsg -IsCritical
                 $global:criticalErrorOccurred = $true
             } else {
-                Write-Log -Message "Архів моделі перед реставрацією готовий -> $ARC_DIR\$ARCH_NAME1" -Level "SUCCESS"
                 
                 # Перевірка контрольних сум після архівації (лише для before)
                 $null = Verify-Backup -ArchivePath "$ARC_DIR\$ARCH_NAME1"
+                Write-Log -Message "Архів до реставрації: створено, перевірено 7-Zip, SHA512 збережено -> $ARC_DIR\$ARCH_NAME1" -Level "SUCCESS"
                 
                 # Виконання реставрації через bravocmd.exe (як в еталоні)
                 $restoreArgs = @("r", "null", "$ROOT_LIMS\MODEL\lims")
                 $exitCode = Invoke-CommandWithLog -Command "$ROOT_LIMS\bravocmd.exe" -Arguments $restoreArgs -Description "Виконання реставрації моделі LIMS"
                 
                 if ($exitCode -eq 0) {
-                    Write-Log -Message "Модель успішно відреставрована" -Level "SUCCESS"
+                    Write-Log -Message "Реставрація LIMS: успішно завершена" -Level "SUCCESS"
                     
                     # Архівація після реставрації ВИКОНУЄТЬСЯ З УМОВАМИ
                     $restoreRequired = $false
                     $createMarker = $true
                     
                     if ($CheckSize) {
-                        Write-Log -Message "Порівняння розмірів файлів..." -Level "INFO"
+                        Write-Log -Message "Перевірка змін: порівняння розмірів файлів..." -Level "DEBUG"
                         $criticalChanges = Compare-FileSizes -BeforeFile $SIZES_FILE -ModelPath $MODEL_PATH -MinSizeBytes 2048
                         
                         if ($criticalChanges) {
                             Write-Log -Message "УВАГА: Виявлено критичні зміни розмірів файлів!" -Level "WARNING"
+                        }
+                        else {
+                            Write-Log -Message "Перевірка змін: розміри файлів без змін" -Level "SUCCESS"
+                        }
+
+                        if ($criticalChanges) {
                             Write-Log -Message "Відновлення моделі з архіву перед реставрацією..." -Level "INFO"
                             
                             $exitCode = Restore-FromArchive -ArchivePath "$ARC_DIR\$ARCH_NAME1" -Destination $MODEL_PATH -ARC_PATH $ARC_PATH
@@ -906,15 +955,17 @@ if ($bravoStatus -ne "Running") {
                             -Description "Архівація моделі після реставрації"
                         $exitCode = if ($archiveCreatedAfter) { 0 } else { 1 }
                         if ($exitCode -eq 0) {
-                            Write-Log -Message "Архів моделі після реставрації створено -> $ARC_DIR\$ARCH_NAME2" -Level "SUCCESS"
                             $null = Verify-Backup -ArchivePath "$ARC_DIR\$ARCH_NAME2"
+                            Write-Log -Message "Архів після реставрації: створено, перевірено 7-Zip, SHA512 збережено -> $ARC_DIR\$ARCH_NAME2" -Level "SUCCESS"
                         }
                         
                         # Створення маркера ЛИШЕ при успішній реставрації без критичних змін
                         if ($createMarker -and -not $ForceRestore) {
                             Set-Content -Path $MARKER_FILE -Value "Реставрація виконана $NOW"
-                            Write-Log -Message "Створено маркерний файл: $MARKER_FILE" -Level "SUCCESS"
+                            Write-Log -Message "Маркер реставрації: створено -> $MARKER_FILE" -Level "SUCCESS"
                         }
+
+                        Write-Log -Message "Статус реставрації: УСПІШНО" -Level "SUCCESS"
                     } else {
                         Write-Log -Message "Архівація після реставрації ПРОПУЩЕНА через критичні зміни" -Level "WARNING"
                     }
@@ -1284,6 +1335,11 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
+
+
+
+
 
 
 
