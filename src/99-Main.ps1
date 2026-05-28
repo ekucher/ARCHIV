@@ -363,6 +363,7 @@ if ($osVersion.Major -lt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -lt
 # Автоматичне визначення каталогу BRAVO_WEB
 $ApacheEnabled = $false
 $ApacheWebDirExists = $false
+$ApacheDetectionMessages = [System.Collections.Generic.List[string]]::new()
 
 $bravoWebCandidates = [System.Collections.Generic.List[string]]::new()
 
@@ -381,7 +382,7 @@ $detectedBravoWebDir = $bravoWebCandidates |
 
 if ($detectedBravoWebDir) {
     if ($BRAVO_WEB_DIR -ne $detectedBravoWebDir) {
-        Write-Host "Каталог Br-a-vo.web визначено автоматично: $detectedBravoWebDir" -ForegroundColor Yellow
+        $ApacheDetectionMessages.Add("Каталог Br-a-vo.web визначено автоматично: $detectedBravoWebDir") | Out-Null
     }
 
     $BRAVO_WEB_DIR = [string]$detectedBravoWebDir
@@ -396,15 +397,15 @@ if ($ApacheServiceExists -and $ApacheWebDirExists) {
     $ApacheEnabled = $true
 
     if (-not $ApacheExists) {
-        Write-Host "Apache service знайдено, але httpd.exe не знайдено: $Apache" -ForegroundColor Yellow
+        $ApacheDetectionMessages.Add("Apache service знайдено, але httpd.exe не знайдено: $Apache") | Out-Null
     }
 
     if (-not $ApacheLogsExist) {
-        Write-Host "Apache service знайдено, але лог-директорії Apache/WWW відсутні - обробка логів буде пропущена" -ForegroundColor Yellow
+        $ApacheDetectionMessages.Add("Apache service знайдено, але лог-директорії Apache/WWW відсутні - обробка логів буде пропущена") | Out-Null
     }
 }
 elseif ($ApacheServiceExists -and -not $ApacheWebDirExists) {
-    Write-Host "Apache service знайдено, але каталог Br-a-vo.web не знайдено - керування Apache вимкнено" -ForegroundColor Yellow
+    $ApacheDetectionMessages.Add("Apache service знайдено, але каталог Br-a-vo.web не знайдено - керування Apache вимкнено") | Out-Null
 }
 
 # Автоматичне визначення кореня LIMS
@@ -572,6 +573,12 @@ if ($script:EnableAutoShutdown) {
 # Відображаємо інформацію про Apache тільки якщо служба існує
 if ($ApacheServiceExists) {
     Write-Log -Message "Наявність Apache: $(if ($ApacheEnabled) {'Увімкнено'} else {'Вимкнено'})" -NoTimestamp
+}
+
+if ($ApacheDetectionMessages -and $ApacheDetectionMessages.Count -gt 0) {
+    foreach ($apacheDetectionMessage in $ApacheDetectionMessages) {
+        Write-Log -Message $apacheDetectionMessage -NoTimestamp
+    }
 }
 
 if ($isRestoreDay -and $isAfterRestoreTime -and (Test-Path $MARKER_FILE)) {
@@ -1277,5 +1284,6 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
 
 
