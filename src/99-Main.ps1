@@ -607,6 +607,13 @@ else {
     "ВИМКНЕНА$restoreMarkerText"
 }
 
+try {
+    $Host.UI.RawUI.WindowTitle = "LIMS Maintenance: ЗАПУЩЕНО ($($global:ObjectName))"
+}
+catch {
+    # Window title is optional and may be unavailable in non-interactive hosts.
+}
+
 if ((Get-BravoConsoleStyle) -eq "modern") {
     $modernExchangAPIStatus = if ($ExchangAPIServiceExists) { "увімкнено" } else { "вимкнено" }
     $modernApacheStatus = if ($ApacheEnabled) { "увімкнено" } else { "вимкнено" }
@@ -1508,8 +1515,22 @@ else {
     
 }
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
+
+try {
+    $Host.UI.RawUI.WindowTitle = if ($exitCode -eq 0) {
+        "LIMS Maintenance: УСПІШНО ЗАВЕРШЕНО"
+    }
+    else {
+        "LIMS Maintenance: ЗАВЕРШЕНО З ПОМИЛКАМИ"
+    }
+}
+catch {
+    # Window title is optional and may be unavailable in non-interactive hosts.
+}
+
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
 
 
 

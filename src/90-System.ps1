@@ -255,8 +255,9 @@ function Wait-BravoInteractiveExit {
     }
 
     try {
+        Start-Sleep -Seconds 1
         Write-Host ""
-        Write-Host "Натисніть будь-яку клавішу для завершення..." -ForegroundColor Yellow
+        Write-Host "Натисніть будь-яку клавішу для завершення... " -ForegroundColor Yellow -NoNewline
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
     }
     catch {
