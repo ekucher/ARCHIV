@@ -307,6 +307,22 @@ function Initialize-BravoProgressState {
         $isSchedulerUser = ($env:USERNAME -ieq $TaskUserName)
         $autoResume = ((ConvertTo-BravoNormalizedSwitch -Value $AutoResumeForScheduler -Default "on") -eq "on")
 
+        $isRestoreStepInProgress = $false
+        if ($existingState.CurrentStep -and [string]$existingState.CurrentStep.Id -eq "RESTORE_MODEL") {
+            $isRestoreStepInProgress = $true
+        }
+
+        if ($isRestoreStepInProgress) {
+            $message = "Виявлено незавершену реставрацію моделі: RunId=$($existingState.RunId), UpdatedAt=$($existingState.UpdatedAt). Автоматичне продовження заблоковано. Перевірте MODEL вручну. Якщо стан моделі коректний, запустіть скрипт із -ResetProgress."
+            Write-Host $message -ForegroundColor Red
+
+            if (Get-Command Send-SlackAlert -ErrorAction SilentlyContinue) {
+                Send-SlackAlert -Message $message -IsCritical
+            }
+
+            throw $message
+        }
+
         if ($isFreshEnough) {
             $resume = $false
 
