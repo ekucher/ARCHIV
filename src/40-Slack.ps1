@@ -62,6 +62,50 @@ function Invoke-BravoSlackWebhook {
     }
 }
 
+function Send-BravoImmediateCriticalAlert {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
+
+    if ($script:SlackMode -eq "none") {
+        return
+    }
+
+    if ($script:SlackMode -notin @("errors_only", "all")) {
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SlackWebhookUrl)) {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log "ПОМИЛКА негайної відправки в Slack: SlackWebhookUrl is empty" -Level "ERROR"
+        }
+        return
+    }
+
+    $datePart = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $objectName = if ($global:ObjectName) { $global:ObjectName } else { "Невідома установа" }
+
+    $criticalMessage = "🚨 КРИТИЧНА ПОДІЯ BRAVO`n" +
+        "🏚️ Установа: $objectName`n" +
+        "🕒 Час: $datePart`n" +
+        "💻 Сервер: $env:COMPUTERNAME`n" +
+        "📌 Деталі:`n$Message"
+
+    try {
+        Invoke-BravoSlackWebhook -Message $criticalMessage
+
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log "Критичне повідомлення негайно відправлено в Slack" -Level "SUCCESS"
+        }
+    }
+    catch {
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) {
+            Write-Log "ПОМИЛКА негайної відправки в Slack: $($_.Exception.Message)" -Level "ERROR"
+        }
+    }
+}
+
 function Send-SlackAlert {
     param(
         [string]$Message,
@@ -80,21 +124,13 @@ function Send-SlackAlert {
         $global:CriticalErrors = $true
         $global:criticalErrorOccurred = $true
         
-        # Для критичних помилок перевіряємо режим "errors_only" або "all"
+        # Кожна аварійна подія має піти в Slack негайно.
+        # Також залишаємо її у фінальному звіті для підсумку запуску.
         if ($script:SlackMode -eq "errors_only" -or $script:SlackMode -eq "all") {
-            if ($isSpaceError) {
-                # Для помилок місця - негайна відправка
-                try {
-                    Invoke-BravoSlackWebhook -Message $Message
-                    Write-Log "Критичне повідомлення (помилки місця) відправлено в Slack" -Level "INFO"
-                }
-                catch {
-                    Write-Log "ПОМИЛКА негайної відправки в Slack: $($_.Exception.Message)" -Level "ERROR"
-                }
-            }
-            else {
-                # Для інших критичних помилок - додаємо до списку для групування
-                $global:CriticalErrorsList.Add($Message)
+            $global:CriticalErrorsList.Add($Message)
+
+            if (Get-Command Send-BravoImmediateCriticalAlert -ErrorAction SilentlyContinue) {
+                Send-BravoImmediateCriticalAlert -Message $Message
             }
         }
     }
