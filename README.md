@@ -1,6 +1,12 @@
 # BRAVO Maintenance / ARCHIV
 
-Монолітний PowerShell-скрипт для обслуговування середовища BRAVOSOFT/LIMS: перевірка стану системи, зупинка/запуск служб, реставрація моделі, архівація, контроль архівів, Slack-сповіщення, робота з Windows Credential Manager і запуск через Windows Task Scheduler.
+Модульний PowerShell-проєкт для обслуговування середовища BRAVOSOFT/LIMS: перевірка стану системи, зупинка/запуск служб, реставрація моделі, архівація, контроль архівів, Slack-сповіщення, робота з Windows Credential Manager і запуск через Windows Task Scheduler.
+
+Фінальний runtime-скрипт збирається з модулів у монолітний файл:
+
+```text
+dist\BRAVO_MAINTENANCE.ps1
+```
 
 Проєкт орієнтований на Windows-сервер з LIMS/BRAVO, Apache 2.4, службами BravoSoft та архівуванням через `7za.exe`.
 
@@ -8,64 +14,92 @@
 
 ## Можливості
 
-- Автоматизоване обслуговування BRAVOSOFT/LIMS.
-- Перевірка вільного місця на дисках.
-- Перевірка розмірів `.md` файлів.
-- Архівація моделі до/після реставрації.
-- Безпечне створення архівів через тимчасовий файл:
-  - створення у `ARCHIV\TEMP`;
-  - перевірка через `7za t`;
-  - перенесення у фінальну директорію тільки після успішної перевірки.
-- Підтримка пароля архіву через Windows Credential Manager.
-- Підтримка `-mhe=on` для шифрування заголовків архіву.
-- SHA512-контроль архівів.
-- Health-check архівів `LIMS`, `BLOG`, `BRAVOEXCH`.
-- Slack-сповіщення:
-  - тільки помилки;
-  - усі повідомлення;
-  - вимкнено.
-- TLS-safe відправка Slack webhook через `Invoke-RestMethod`.
-- Progress-state після аварійного вимкнення живлення.
-- Встановлення задачі Windows Scheduler під окремим прихованим неінтерактивним користувачем.
-- Bootstrap credential-ів для користувача планувальника.
-- Локальна конфігурація через `BRAVO.config.ps1`.
+* Автоматизоване обслуговування BRAVOSOFT/LIMS.
+* Перевірка вільного місця на дисках.
+* Перевірка розмірів `.md` файлів.
+* Архівація моделі до/після реставрації.
+* Безпечне створення архівів через тимчасовий файл:
+
+  * створення у `ARCHIV\TEMP`;
+  * перевірка через `7za t`;
+  * перенесення у фінальну директорію тільки після успішної перевірки.
+* Підтримка пароля архіву через Windows Credential Manager.
+* Підтримка `-mhe=on` для шифрування заголовків архіву.
+* SHA512-контроль архівів.
+* Health-check архівів `LIMS`, `BLOG`, `BRAVOEXCH`.
+* Slack-сповіщення:
+
+  * тільки помилки;
+  * усі повідомлення;
+  * вимкнено.
+* TLS-safe відправка Slack webhook через `Invoke-RestMethod`.
+* Progress-state після аварійного вимкнення живлення.
+* Встановлення задачі Windows Scheduler під окремим прихованим неінтерактивним користувачем.
+* Bootstrap credential-ів для користувача планувальника.
+* Локальна конфігурація через `BRAVO.config.ps1`.
+* GitHub Actions build/syntax validation.
 
 ---
 
 ## Основні файли
 
-| Файл | Призначення |
-|---|---|
-| `BRAVO_MAINTENANCE.ps1` | Основний монолітний скрипт обслуговування |
-| `BRAVO.config.example.ps1` | Приклад конфігурації без секретів |
-| `BRAVO.config.ps1` | Локальний конфіг сервера, не комітити |
-| `README.md` | Документація |
-| `.gitignore` | Виключення runtime-файлів, логів, архівів і секретів |
+| Файл / директорія                              | Призначення                                                |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| `src\*.ps1`                                    | Модульні частини maintenance-скрипта                       |
+| `src\BRAVO.build.json`                         | Manifest зі списком модулів і порядком збірки              |
+| `src\99-Main.ps1`                              | Orchestration-файл: порядок виконання maintenance-сценарію |
+| `Build-BRAVO-Monolith.ps1`                     | Збирає модулі з `src` у фінальний моноліт                  |
+| `dist\BRAVO_MAINTENANCE.ps1`                   | Згенерований монолітний скрипт після build                 |
+| `dist\BRAVO_MAINTENANCE.ps1.sha512`            | SHA512 checksum згенерованого моноліту                     |
+| `BRAVO.config.example.ps1`                     | Приклад конфігурації без секретів                          |
+| `BRAVO.config.ps1`                             | Локальний конфіг сервера, не комітити                      |
+| `.github\workflows\bravo-build-validation.yml` | GitHub Actions build/syntax validation                     |
+| `README.md`                                    | Документація                                               |
+| `.gitignore`                                   | Виключення runtime-файлів, логів, архівів і секретів       |
 
 ---
 
 ## Модульна структура `src`
 
-Проєкт розділений на модулі в директорії `src`. Фінальний монолітний скрипт збирається через `Build-BRAVO-Monolith.ps1` у директорію `dist`.
+| Модуль                 | Призначення                                                       |
+| ---------------------- | ----------------------------------------------------------------- |
+| `05-Params.ps1`        | Параметри запуску                                                 |
+| `10-Config.ps1`        | Завантаження `BRAVO.config.ps1` і `Get-BravoConfigValue`          |
+| `20-Logging.ps1`       | Логування через `Write-Log`                                       |
+| `30-Credentials.ps1`   | Windows Credential Manager, секрети, scheduler user               |
+| `40-Slack.ps1`         | Slack webhook, Slack modes, фінальні повідомлення                 |
+| `50-ProgressState.ps1` | Progress-state і recovery після переривання                       |
+| `60-Files.ps1`         | Робота з файлами, логами, cleanup, `.md` size checks              |
+| `70-Archive.ps1`       | 7-Zip, verified archives, restore, SHA512                         |
+| `80-HealthCheck.ps1`   | Health-check архівів, дисків і checksum-ів                        |
+| `90-System.ps1`        | OS/system checks, free-space check, auto-shutdown, command runner |
+| `99-Main.ps1`          | Orchestration runtime-сценарію без визначень функцій              |
 
-| Модуль | Призначення |
-|---|---|
-| `05-Params.ps1` | Параметри запуску |
-| `10-Config.ps1` | Завантаження `BRAVO.config.ps1` і `Get-BravoConfigValue` |
-| `20-Logging.ps1` | Логування через `Write-Log` |
-| `30-Credentials.ps1` | Windows Credential Manager, секрети, scheduler user |
-| `40-Slack.ps1` | Slack webhook, Slack modes, фінальні повідомлення |
-| `50-ProgressState.ps1` | Progress-state і recovery після переривання |
-| `60-Files.ps1` | Робота з файлами, логами, cleanup, `.md` size checks |
-| `70-Archive.ps1` | 7-Zip, verified archives, restore, SHA512 |
-| `80-HealthCheck.ps1` | Health-check архівів, дисків і checksum-ів |
-| `90-System.ps1` | OS/system checks, free-space check, auto-shutdown, command runner |
-| `99-Main.ps1` | Orchestration runtime-сценарію без визначень функцій |
+Порядок збірки визначається у:
 
-Збірка:
+```text
+src\BRAVO.build.json
+```
 
-```powershell
-.\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
+Поточний порядок модулів:
+
+```json
+{
+    "files": [
+        "src/05-Params.ps1",
+        "src/10-Config.ps1",
+        "src/20-Logging.ps1",
+        "src/30-Credentials.ps1",
+        "src/40-Slack.ps1",
+        "src/50-ProgressState.ps1",
+        "src/60-Files.ps1",
+        "src/70-Archive.ps1",
+        "src/80-HealthCheck.ps1",
+        "src/90-System.ps1",
+        "src/99-Main.ps1"
+    ]
+}
+```
 
 ---
 
@@ -89,30 +123,32 @@ C:\LIMS\ARCHIV
 
 Призначення:
 
-| Директорія | Призначення |
-|---|---|
-| `LIMS\` | Архіви основної моделі LIMS |
-| `BLOG\` | Архіви BLOG |
-| `BRAVOEXCH\` | Архіви BRAVOEXCH |
-| `LOGS\` | Логи роботи скрипта |
-| `STATE\` | Progress-state для відновлення після збою |
-| `TEMP\` | Тимчасові архіви до перевірки через `7za t` |
-| `Trace\` | Оброблені trace/log файли |
-| `Tools\` | Допоміжні утиліти, наприклад `7za.exe` |
+| Директорія   | Призначення                                 |
+| ------------ | ------------------------------------------- |
+| `LIMS\`      | Архіви основної моделі LIMS                 |
+| `BLOG\`      | Архіви BLOG                                 |
+| `BRAVOEXCH\` | Архіви BRAVOEXCH                            |
+| `LOGS\`      | Логи роботи скрипта                         |
+| `STATE\`     | Progress-state для відновлення після збою   |
+| `TEMP\`      | Тимчасові архіви до перевірки через `7za t` |
+| `Trace\`     | Оброблені trace/log файли                   |
+| `Tools\`     | Допоміжні утиліти, наприклад `7za.exe`      |
 
 ---
 
 ## Вимоги
 
-- Windows PowerShell 5.1.
-- Права адміністратора для:
-  - створення локального користувача планувальника;
-  - налаштування прав `Log on as batch job`;
-  - встановлення scheduled task;
-  - керування службами.
-- `7za.exe` або сумісний 7-Zip CLI.
-- Доступ до директорії `C:\LIMS`.
-- За потреби: Slack Incoming Webhook URL.
+* Windows PowerShell 5.1.
+* Windows 8.1 / Windows Server 2012 R2 або новіше.
+* Права адміністратора для:
+
+  * створення локального користувача планувальника;
+  * налаштування прав `Log on as batch job`;
+  * встановлення scheduled task;
+  * керування службами.
+* `7za.exe` або сумісний 7-Zip CLI.
+* Доступ до директорії `C:\LIMS`.
+* За потреби: Slack Incoming Webhook URL.
 
 ---
 
@@ -130,25 +166,33 @@ notepad .\BRAVO.config.ps1
 
 ---
 
-### 2. Перевірити синтаксис
+### 2. Зібрати моноліт
 
 ```powershell
-$scriptText = Get-Content -LiteralPath .\BRAVO_MAINTENANCE.ps1 -Raw
-
-try {
-    [scriptblock]::Create($scriptText) | Out-Null
-    "Syntax OK"
-}
-catch {
-    $_.Exception.Message
-}
+.\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
 ```
 
 Очікувано:
 
 ```text
-Syntax OK
+Built monolith: C:\LIMS\ARCHIV\dist\BRAVO_MAINTENANCE.ps1
+Syntax OK: C:\LIMS\ARCHIV\dist\BRAVO_MAINTENANCE.ps1
+SHA512 created: C:\LIMS\ARCHIV\dist\BRAVO_MAINTENANCE.ps1.sha512
+
+Build completed successfully.
 ```
+
+---
+
+### 3. Запускати згенерований скрипт
+
+Після build основний runtime-файл:
+
+```powershell
+.\dist\BRAVO_MAINTENANCE.ps1
+```
+
+Якщо використовується production-розміщення, переконайтесь, що поруч із runtime-скриптом доступні потрібні локальні файли конфігурації та інструменти.
 
 ---
 
@@ -226,14 +270,14 @@ $global:BravoConfig = @{
 ### Інтерактивне збереження секретів
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -SetupCredentials
+.\dist\BRAVO_MAINTENANCE.ps1 -SetupCredentials
 ```
 
 Скрипт може зберігати:
 
-- пароль архіву;
-- Slack webhook URL;
-- інші credential-и, якщо відповідна функція увімкнена в конфігу.
+* пароль архіву;
+* Slack webhook URL;
+* інші credential-и, якщо відповідна функція увімкнена в конфігу.
 
 Важливо: Windows Credential Manager зберігає записи **для конкретного Windows-користувача**. Якщо задача запускається під `BRAVO_Scheduler`, секрети мають бути доступні саме цьому користувачу. Для цього використовується credential bootstrap під час встановлення scheduled task.
 
@@ -299,11 +343,11 @@ SlackMode = "errors_only"
 SlackMode = "all"
 ```
 
-| Режим | Поведінка |
-|---|---|
-| `off` | Slack вимкнено |
-| `errors_only` | Надсилати тільки критичні помилки |
-| `all` | Надсилати всі підсумкові повідомлення |
+| Режим         | Поведінка                             |
+| ------------- | ------------------------------------- |
+| `off`         | Slack вимкнено                        |
+| `errors_only` | Надсилати тільки критичні помилки     |
+| `all`         | Надсилати всі підсумкові повідомлення |
 
 Якщо `SlackMode` не дорівнює `off`, скрипт може запропонувати зберегти Slack webhook URL у Windows Credential Manager.
 
@@ -313,17 +357,17 @@ SlackMode = "all"
 
 Health-check перевіряє:
 
-- вільне місце на дисках;
-- наявність останніх архівів;
-- вік архівів;
-- розмір архівів;
-- SHA512-файли;
-- валідність SHA512.
+* вільне місце на дисках;
+* наявність останніх архівів;
+* вік архівів;
+* розмір архівів;
+* SHA512-файли;
+* валідність SHA512.
 
 Окремий запуск:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -HealthCheckOnly
+.\dist\BRAVO_MAINTENANCE.ps1 -HealthCheckOnly
 ```
 
 Приклад успішного результату:
@@ -342,7 +386,7 @@ Health-check: критичних проблем не виявлено
 Пропустити health-check у звичайному запуску:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -SkipHealthCheck
+.\dist\BRAVO_MAINTENANCE.ps1 -SkipHealthCheck
 ```
 
 ---
@@ -357,29 +401,29 @@ C:\LIMS\ARCHIV\STATE\BRAVO_MAINTENANCE_STATE.json
 
 У ньому зберігаються:
 
-- `RunId`;
-- статус запуску;
-- поточний етап;
-- завершені етапи;
-- час старту/оновлення/завершення;
-- metadata: імена архівів, логів, marker-файлів.
+* `RunId`;
+* статус запуску;
+* поточний етап;
+* завершені етапи;
+* час старту/оновлення/завершення;
+* metadata: імена архівів, логів, marker-файлів.
 
 Показати стан:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -ShowProgressState
+.\dist\BRAVO_MAINTENANCE.ps1 -ShowProgressState
 ```
 
 Скинути попередній state і почати новий запуск:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -ResetProgress
+.\dist\BRAVO_MAINTENANCE.ps1 -ResetProgress
 ```
 
 Проігнорувати state для поточного запуску:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -IgnoreProgress
+.\dist\BRAVO_MAINTENANCE.ps1 -IgnoreProgress
 ```
 
 Типові checkpoint-и:
@@ -410,16 +454,16 @@ LIMS-PCS\BRAVO_Scheduler
 
 Користувач:
 
-- створюється автоматично;
-- приховується з екрана входу;
-- отримує право запуску batch job;
-- блокується для інтерактивного/RDP входу;
-- може отримати доступ до Credential Manager через bootstrap.
+* створюється автоматично;
+* приховується з екрана входу;
+* отримує право запуску batch job;
+* блокується для інтерактивного/RDP входу;
+* може отримати доступ до Credential Manager через bootstrap.
 
 Приклад встановлення задачі:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 `
+.\dist\BRAVO_MAINTENANCE.ps1 `
     -InstallScheduledTask `
     -TaskTime 23:00 `
     -TaskDaysOfWeek Sunday `
@@ -429,7 +473,7 @@ LIMS-PCS\BRAVO_Scheduler
 Зі скиданням пароля task-user:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 `
+.\dist\BRAVO_MAINTENANCE.ps1 `
     -InstallScheduledTask `
     -TaskTime 23:00 `
     -TaskDaysOfWeek Sunday `
@@ -440,7 +484,7 @@ LIMS-PCS\BRAVO_Scheduler
 Якщо потрібно пропустити credential bootstrap:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 `
+.\dist\BRAVO_MAINTENANCE.ps1 `
     -InstallScheduledTask `
     -TaskTime 23:00 `
     -TaskDaysOfWeek Sunday `
@@ -461,81 +505,117 @@ Get-ScheduledTask -TaskPath "\BRAVO\" |
 ### Звичайний запуск
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1
+.\dist\BRAVO_MAINTENANCE.ps1
 ```
 
 ### Тільки health-check
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -HealthCheckOnly
+.\dist\BRAVO_MAINTENANCE.ps1 -HealthCheckOnly
 ```
 
 ### Зберегти секрети
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -SetupCredentials
+.\dist\BRAVO_MAINTENANCE.ps1 -SetupCredentials
 ```
 
 ### Показати progress-state
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -ShowProgressState
+.\dist\BRAVO_MAINTENANCE.ps1 -ShowProgressState
 ```
 
 ### Скинути progress-state
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -ResetProgress
+.\dist\BRAVO_MAINTENANCE.ps1 -ResetProgress
 ```
 
 ### Пропустити Slack
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -DisableAllSlack
+.\dist\BRAVO_MAINTENANCE.ps1 -DisableAllSlack
 ```
 
 ### Увімкнути всі Slack-повідомлення
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -EnableAllSlack
+.\dist\BRAVO_MAINTENANCE.ps1 -EnableAllSlack
 ```
 
 ---
 
 ## Перевірка після змін
 
-Синтаксис:
+Основна перевірка після змін у `src`:
 
 ```powershell
-$scriptText = Get-Content -LiteralPath .\BRAVO_MAINTENANCE.ps1 -Raw
+.\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
+```
 
-try {
-    [scriptblock]::Create($scriptText) | Out-Null
-    "Syntax OK"
+Очікувано:
+
+```text
+Syntax OK: C:\LIMS\ARCHIV\dist\BRAVO_MAINTENANCE.ps1
+SHA512 created: C:\LIMS\ARCHIV\dist\BRAVO_MAINTENANCE.ps1.sha512
+Build completed successfully.
+```
+
+Перевірити, що `99-Main.ps1` лишається orchestration-файлом без визначень функцій:
+
+```powershell
+$tokens = $null
+$errors = $null
+
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    (Resolve-Path .\src\99-Main.ps1),
+    [ref]$tokens,
+    [ref]$errors
+)
+
+if ($errors -and $errors.Count -gt 0) {
+    $errors | ForEach-Object {
+        "Line {0}, Column {1}: {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message
+    }
+    throw "src\99-Main.ps1 has parse errors"
 }
-catch {
-    $_.Exception.Message
+
+$functions = @(
+    $ast.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+    }, $true)
+)
+
+if ($functions.Count -ne 0) {
+    $functions |
+        Select-Object Name, @{Name="Line";Expression={$_.Extent.StartLineNumber}} |
+        Sort-Object Line |
+        Format-Table -AutoSize
+
+    throw "src\99-Main.ps1 still contains function definitions."
 }
+
+"OK: src\99-Main.ps1 contains no function definitions."
 ```
 
-Перевірка ключових функцій:
+Перевірити залишки старих marker/comment блоків:
 
 ```powershell
-Select-String -Path .\BRAVO_MAINTENANCE.ps1 -Pattern `
-    "BRAVO_VERIFIED_ARCHIVE|New-BravoVerifiedArchive|ArchivePasswordEncryptHeaders|ArchiveTempDir|-mhe=on"
+Select-String -Path .\src\99-Main.ps1 `
+    -Pattern '^\s*function\s+|^\s*#\s*>>>\s|^\s*#\s*<<<\s|^\s*#\s*={3,}.*ФУНКЦІЯ|^\s*#\s*Функція' `
+    -CaseSensitive `
+    -Context 1,1
 ```
 
-Health-check:
+Очікувано: команда не має повертати результатів.
 
-```powershell
-.\BRAVO_MAINTENANCE.ps1 -HealthCheckOnly
-```
+GitHub Actions автоматично виконує build/syntax validation для:
 
-Progress-state:
-
-```powershell
-.\BRAVO_MAINTENANCE.ps1 -ShowProgressState
-```
+* `push` у `main`;
+* `pull_request` у `main`;
+* ручного запуску через `workflow_dispatch`.
 
 ---
 
@@ -562,10 +642,14 @@ Progress-state:
 
 # Patch / backup files
 /Apply-BRAVO-*.ps1
+/Cleanup-*.ps1
+/Extract-BRAVO-*.ps1
+/Update-README-*.ps1
 /*.bak_*
 /*.tmp
 
 # Generated files
+/dist/
 /*.log
 /*.csv
 /*.mdz
@@ -581,7 +665,8 @@ git add .
 Краще додавати тільки потрібні файли:
 
 ```powershell
-git add BRAVO_MAINTENANCE.ps1 BRAVO.config.example.ps1 README.md .gitignore
+git add src\BRAVO.build.json src\*.ps1 Build-BRAVO-Monolith.ps1 README.md
+git add .github\workflows\bravo-build-validation.yml .gitignore
 ```
 
 ---
@@ -591,13 +676,14 @@ git add BRAVO_MAINTENANCE.ps1 BRAVO.config.example.ps1 README.md .gitignore
 Перевірити статус:
 
 ```powershell
-git status
+git status --short
 ```
 
 Додати основні файли:
 
 ```powershell
-git add BRAVO_MAINTENANCE.ps1 BRAVO.config.example.ps1 README.md
+git add src\BRAVO.build.json src\*.ps1 Build-BRAVO-Monolith.ps1 README.md
+git add .github\workflows\bravo-build-validation.yml
 ```
 
 Перевірити staged-файли:
@@ -609,14 +695,16 @@ git diff --cached --name-only
 Коміт:
 
 ```powershell
-git commit -m "Add verified archive creation and health checks"
+git commit -m "Update BRAVO maintenance modules"
 ```
 
-Push:
+Push feature-гілки:
 
 ```powershell
-git push origin main
+git push -u origin feature/my-change
 ```
+
+Після merge у `main` GitHub Actions має пройти успішно.
 
 ---
 
@@ -627,7 +715,7 @@ git push origin main
 Запустіть:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -SetupCredentials
+.\dist\BRAVO_MAINTENANCE.ps1 -SetupCredentials
 ```
 
 Якщо задача запускається під `BRAVO_Scheduler`, перевстановіть задачу з credential bootstrap.
@@ -671,13 +759,13 @@ HealthCheckArchiveCategories = @(
 Подивитися state:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -ShowProgressState
+.\dist\BRAVO_MAINTENANCE.ps1 -ShowProgressState
 ```
 
 Почати чисто:
 
 ```powershell
-.\BRAVO_MAINTENANCE.ps1 -ResetProgress
+.\dist\BRAVO_MAINTENANCE.ps1 -ResetProgress
 ```
 
 ---
@@ -694,37 +782,57 @@ New-Item -Path C:\LIMS\ARCHIV\TEMP -ItemType Directory -Force
 
 ---
 
+### `ПОМИЛКА: Скрипт має запускатись лише з папки ARCHIV!`
+
+Скрипт очікує запуск із директорії `ARCHIV`.
+
+Правильно:
+
+```powershell
+cd C:\LIMS\ARCHIV
+.\dist\BRAVO_MAINTENANCE.ps1
+```
+
+Якщо запуск іде через Task Scheduler, перевірте `Start in / Working directory`.
+
+---
+
 ## Рекомендована експлуатація
 
 1. Налаштувати `BRAVO.config.ps1`.
 2. Зберегти секрети через `-SetupCredentials`.
-3. Перевірити `-HealthCheckOnly`.
-4. Встановити scheduled task під `BRAVO_Scheduler`.
-5. Після першого maintenance запуску перевірити:
-   - `LOGS`;
-   - `STATE`;
-   - Slack;
-   - актуальність архівів;
-   - SHA512;
-   - порожню `TEMP` після успішної архівації.
-6. Не комітити runtime-файли та локальні конфіги.
+3. Зібрати моноліт через `Build-BRAVO-Monolith.ps1`.
+4. Перевірити `-HealthCheckOnly`.
+5. Встановити scheduled task під `BRAVO_Scheduler`.
+6. Після першого maintenance запуску перевірити:
+
+   * `LOGS`;
+   * `STATE`;
+   * Slack;
+   * актуальність архівів;
+   * SHA512;
+   * порожню `TEMP` після успішної архівації.
+7. Не комітити runtime-файли та локальні конфіги.
 
 ---
 
 ## Статус реалізованих функцій
 
-| Функція | Статус |
-|---|---|
-| Windows Credential Manager | Реалізовано |
-| Dedicated scheduler user | Реалізовано |
-| Slack TLS-safe sender | Реалізовано |
-| Progress-state | Реалізовано |
-| Health-check архівів | Реалізовано |
-| SHA512 validation | Реалізовано |
-| Verified temp archive | Реалізовано |
-| `-mhe=on` encrypted headers | Реалізовано |
-| Network backup | Заплановано |
-| SFTP upload | Заплановано |
+| Функція                             | Статус      |
+| ----------------------------------- | ----------- |
+| Modular source structure            | Реалізовано |
+| Monolith build from `src`           | Реалізовано |
+| GitHub Actions build validation     | Реалізовано |
+| Windows Credential Manager          | Реалізовано |
+| Dedicated scheduler user            | Реалізовано |
+| Slack TLS-safe sender               | Реалізовано |
+| Progress-state                      | Реалізовано |
+| Health-check архівів                | Реалізовано |
+| SHA512 validation                   | Реалізовано |
+| Verified temp archive               | Реалізовано |
+| `-mhe=on` encrypted headers         | Реалізовано |
+| Network backup                      | Заплановано |
+| SFTP upload                         | Заплановано |
 | ArchiveOnly для LIMS/BLOG/BRAVOEXCH | Заплановано |
 
 ---
@@ -745,4 +853,5 @@ LOGS\
 STATE\
 TEMP\
 Trace\
+dist\
 ```
