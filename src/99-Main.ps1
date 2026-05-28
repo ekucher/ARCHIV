@@ -306,22 +306,6 @@ if ($DisableAllSlack) {
     #Write-Host "Режим Slack: ВИМКНЕНО (none) - за замовчуванням" -ForegroundColor Yellow
 }
 
-# Визначаємо режим автоматичного вимкнення
-# Якщо параметр передано через командний рядок - використовуємо його, інакше - значення з налаштувань
-if ($PSBoundParameters.ContainsKey('AutoShutdown')) {
-    # Використовуємо значення з параметра командного рядка
-    $AutoShutdown = $AutoShutdown.ToLower()
-} else {
-    # Використовуємо значення з налаштувань
-    $AutoShutdown = $AutoShutdown.ToLower()
-}
-
-if ($AutoShutdown -notin @("on", "off")) {
-    Write-Host "ПОМИЛКА: Параметр AutoShutdown має бути 'on' або 'off'. Поточне значення: $AutoShutdown" -ForegroundColor Red
-    exit 1
-}
-
-$script:EnableAutoShutdown = ($AutoShutdown -eq "on")
 
 # ===== ПЕРЕВІРКА ДЛЯ ARCHIV_LIMS =====
 # Якщо параметр передано через командний рядок - використовуємо його, інакше - значення з налаштувань
