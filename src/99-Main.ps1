@@ -307,22 +307,6 @@ if ($DisableAllSlack) {
 }
 
 
-# ===== ПЕРЕВІРКА ДЛЯ ARCHIV_LIMS =====
-# Якщо параметр передано через командний рядок - використовуємо його, інакше - значення з налаштувань
-if ($PSBoundParameters.ContainsKey('ArchivLims')) {
-    # Використовуємо значення з параметра командного рядка
-    $ArchivLims = $ArchivLims.ToLower()
-} else {
-    # Використовуємо значення з налаштувань
-    $ArchivLims = $ArchivLims.ToLower()
-}
-
-if ($ArchivLims -notin @("on", "off")) {
-    Write-Host "ПОМИЛКА: Параметр ArchivLims має бути 'on' або 'off'. Поточне значення: $ArchivLims" -ForegroundColor Red
-    exit 1
-}
-
-$script:EnableArchivLims = ($ArchivLims -eq "on")
 
 # ===== ФУНКЦІЯ ЛОГУВАННЯ =====
 
