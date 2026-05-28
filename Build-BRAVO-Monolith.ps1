@@ -64,6 +64,27 @@ function Resolve-BravoBuildPath {
 
     return [System.IO.Path]::GetFullPath((Join-Path -Path $BasePath -ChildPath $Path))
 }
+function Get-BravoRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$FullPath
+    )
+
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath)
+    $targetFull = [System.IO.Path]::GetFullPath($FullPath)
+
+    if (-not $baseFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $baseFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    $baseUri = New-Object System.Uri($baseFull)
+    $targetUri = New-Object System.Uri($targetFull)
+
+    $relativeUri = $baseUri.MakeRelativeUri($targetUri)
+    $relativePath = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+
+    return ($relativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+}
 
 function Invoke-BravoGit {
     param(
@@ -284,7 +305,7 @@ $header = @"
 [void]$parts.Add($header)
 
 foreach ($file in $sourceFiles) {
-    $relative = [System.IO.Path]::GetRelativePath($projectRootFull, $file.FullName)
+    $relative = Get-BravoRelativePath -BasePath $projectRootFull -FullPath $file.FullName
     $content = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
     $content = ConvertTo-BravoLf -Text $content
 
