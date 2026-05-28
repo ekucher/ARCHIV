@@ -421,6 +421,20 @@ if ((Split-Path -Leaf $scriptPath) -ne "ARCHIV") {
 $ROOT_LIMS = Split-Path -Parent $scriptPath
 $ExchangAPIExePath = "$ROOT_LIMS\exchangAPI.exe"  # Шлях до exchangAPI.exe
 
+# Інформація про NSSM-службу exchangAPI
+$ExchangAPIService = Get-Service -Name $ExchangAPIServiceName -ErrorAction SilentlyContinue
+$ExchangAPIServiceExists = ($null -ne $ExchangAPIService)
+$ExchangAPIServiceWorkingDir = $null
+
+if ($ExchangAPIServiceExists) {
+    $exchangApiNssmPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ExchangAPIServiceName\Parameters"
+
+    if (Test-Path -LiteralPath $exchangApiNssmPath) {
+        $exchangApiNssmParams = Get-ItemProperty -LiteralPath $exchangApiNssmPath -ErrorAction SilentlyContinue
+        $ExchangAPIServiceWorkingDir = [string]$exchangApiNssmParams.AppDirectory
+    }
+}
+
 # Похідні шляхи
 $MODEL_PATH = "$ROOT_LIMS\Model"
 $LOG_DIR = "$ROOT_LIMS\ARCHIV\LOGS"
@@ -534,6 +548,17 @@ Write-Log -Message "Коренева директорія: $ROOT_LIMS" -NoTimest
 Write-Log -Message "Дата: $($currentDate.ToString('yyyy-MM-dd'))" -NoTimestamp
 Write-Log -Message "Час: $($currentDate.ToString('HH:mm:ss'))" -NoTimestamp
 Write-Log -Message "Налаштування Slack: Режим $(switch ($script:SlackMode) {'none' {'ВИМКНЕНО'} 'errors_only' {'ЛИШЕ ПОМИЛКИ'} 'all' {'УСІ ПОВІДОМЛЕННЯ'}})" -NoTimestamp
+
+if ($ExchangAPIServiceExists) {
+    Write-Log -Message "Наявність exchangAPI service: Увімкнено" -NoTimestamp
+
+    if (-not [string]::IsNullOrWhiteSpace($ExchangAPIServiceWorkingDir)) {
+        Write-Log -Message "Робочий каталог exchangAPI: $ExchangAPIServiceWorkingDir" -NoTimestamp
+    }
+}
+else {
+    Write-Log -Message "Наявність exchangAPI service: Вимкнено" -NoTimestamp
+}
 Write-Log -Message "Progress state file: $PROGRESS_STATE_FILE" -Level "DEBUG"
 if ($script:BravoProgressStateWasResumed) {
     Write-Log -Message "Відновлення виконання після незавершеного запуску: RunId=$($script:BravoProgressState.RunId)" -Level "WARNING"
@@ -1252,4 +1277,5 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
 
