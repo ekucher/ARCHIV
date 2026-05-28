@@ -317,34 +317,12 @@ $restoreDayMap = @{
 }
 $RestoreDayOfWeek = $restoreDayMap[$RestoreDay]
 $RestoreDayName = $RestoreDayOfWeek.ToString()
-# Функція відновлення з архіву (для відкату при помилках)
-
-# Функція виконання команд з логуванням
-
 # >>> BRAVO_VERIFIED_ARCHIVE BEGIN
 # --------------------------------
 # Safe archive creation: temp archive -> 7-Zip test -> final move
 # --------------------------------
 
 # <<< BRAVO_VERIFIED_ARCHIVE END
-
-# Функція обробки лог-файлів
-
-# Функція архівації старих даних
-
-# Функція видалення старих директорій
-
-# Функція видалення старих лог-файлів
-
-# Функція обробки старих даних
-
-# Функція видалення старих архівів реставрації (за кількістю версій)
-
-# ===== ФУНКЦІЯ ПЕРЕВІРКИ ВІЛЬНОГО МІСЦЯ =====
-
-# Функція перевірки контрольних сум архіву
-
-# Функція перевірки розмірів .md файлів
 # Перевірка версії ОС
 $osVersion = [System.Environment]::OSVersion.Version
 if ($osVersion.Major -lt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -lt 3)) {
