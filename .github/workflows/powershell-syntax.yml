@@ -101,3 +101,4 @@ jobs:
 
           Get-Item .\dist\BRAVO_MAINTENANCE.ps1
           Get-Item .\dist\BRAVO_MAINTENANCE.ps1.sha512
+
