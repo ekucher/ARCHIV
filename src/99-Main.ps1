@@ -763,12 +763,32 @@ if ($bravoStatus -ne "Running") {
             
             # Архівація перед реставрацією
             $archivePathBefore = "$ARC_DIR\$ARCH_NAME1"
-            $archiveCreatedBefore = New-BravoVerifiedArchive `
-                -ArchivePath $archivePathBefore `
-                -SourcePath "$MODEL_PATH\*" `
-                -ArcCommonParams $arcCommonParams `
-                -ARC_PATH $ARC_PATH `
-                -Description "Архівація моделі перед реставрацією"
+            $archiveCreatedBefore = $false
+
+            if ((Test-Path -LiteralPath $archivePathBefore) -or (Test-Path -LiteralPath "$archivePathBefore.sha512")) {
+                $beforeShaResult = Test-BravoArchiveSha512 -ArchivePath $archivePathBefore
+
+                if ($beforeShaResult.Status -eq "Valid") {
+                    Write-Log -Message "Before-архів уже існує і SHA512 валідний. Повторне створення пропущено: $archivePathBefore" -Level "WARNING"
+                    $archiveCreatedBefore = $true
+                }
+                else {
+                    $errorMsg = "Before-архів уже існує, але SHA512 невалідний або відсутній. Реставрацію зупинено, щоб не перезаписати аварійний backup: $archivePathBefore"
+                    Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
+                    Send-SlackAlert -Message $errorMsg -IsCritical
+                    $global:criticalErrorOccurred = $true
+                    $archiveCreatedBefore = $false
+                }
+            }
+            else {
+                $archiveCreatedBefore = New-BravoVerifiedArchive `
+                    -ArchivePath $archivePathBefore `
+                    -SourcePath "$MODEL_PATH\*" `
+                    -ArcCommonParams $arcCommonParams `
+                    -ARC_PATH $ARC_PATH `
+                    -Description "Архівація моделі перед реставрацією"
+            }
+
             $exitCode = if ($archiveCreatedBefore) { 0 } else { 1 }
             
             if ($exitCode -ne 0) {
@@ -777,7 +797,7 @@ if ($bravoStatus -ne "Running") {
                 Send-SlackAlert -Message $errorMsg -IsCritical
                 $global:criticalErrorOccurred = $true
             } else {
-                Write-Log -Message "Архів моделі перед реставрацією створено -> $ARC_DIR\$ARCH_NAME1" -Level "SUCCESS"
+                Write-Log -Message "Архів моделі перед реставрацією готовий -> $ARC_DIR\$ARCH_NAME1" -Level "SUCCESS"
                 
                 # Перевірка контрольних сум після архівації (лише для before)
                 $null = Verify-Backup -ArchivePath "$ARC_DIR\$ARCH_NAME1"
