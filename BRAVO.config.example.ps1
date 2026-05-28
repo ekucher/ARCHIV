@@ -92,5 +92,14 @@
     ArchiveTempDir = "{ROOT_LIMS}\ARCHIV\TEMP"
     ArchivePassword = ""
     ArchivePasswordCredentialTarget = "BRAVO/ArchivePassword"
+    # Console output style:
+    # classic = old output, modern = new DevOps-style output
+    ConsoleStyle = "classic"
+    ConsoleWidth = 80
+    ConsoleIcons = "emoji"     # emoji | ascii | off
+    ConsoleLabelWidth = 12
+    ConsoleStatusWidth = 12
+
 
 }
+
