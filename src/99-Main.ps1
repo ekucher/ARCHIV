@@ -607,12 +607,31 @@ else {
     "ВИМКНЕНА$restoreMarkerText"
 }
 
-Write-Log -Message "==="
-Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАПУЩЕНА | $($global:ObjectName) ==="
-Write-Log -Message "==="
-Write-Log -Message "Корінь: $ROOT_LIMS | Дата/час: $($currentDate.ToString('yyyy-MM-dd HH:mm:ss')) | Slack: $slackModeText" -NoTimestamp
-Write-Log -Message "Служби: exchangAPI=$exchangAPIStatus | Apache=$apacheStatus" -NoTimestamp
+if ((Get-BravoConsoleStyle) -eq "modern") {
+    $modernExchangAPIStatus = if ($ExchangAPIServiceExists) { "увімкнено" } else { "вимкнено" }
+    $modernApacheStatus = if ($ApacheEnabled) { "увімкнено" } else { "вимкнено" }
+    $modernApacheMode = if (-not [string]::IsNullOrWhiteSpace($apacheModeText)) { $apacheModeText.Trim().TrimStart(",").Trim() } else { "конфіг" }
+    $modernRestoreMode = if ($shouldRestore) { "РЕСТАВРАЦІЯ АКТИВОВАНА ($restoreReason)" } else { "Реставрація вимкнена" }
+    $modernMarker = if (Test-Path $MARKER_FILE) { [System.IO.Path]::GetFileName($MARKER_FILE) } else { "немає" }
 
+    $startupLines = @(
+        "Установа: $($global:ObjectName) | Дата: $($currentDate.ToString('yyyy-MM-dd HH:mm:ss'))",
+        "Корінь:   $ROOT_LIMS | Slack: $slackModeText",
+        "Служби:   exchangAPI = $modernExchangAPIStatus | Apache = $modernApacheStatus ($modernApacheMode)",
+        "Режим:    $modernRestoreMode",
+        "Маркер:   $modernMarker"
+    )
+
+    Write-BravoConsoleBox -Title "СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT" -Lines $startupLines
+}
+else {
+    Write-Log -Message "==="
+    Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАПУЩЕНА | $($global:ObjectName) ==="
+    Write-Log -Message "==="
+    Write-Log -Message "Корінь: $ROOT_LIMS | Дата/час: $($currentDate.ToString('yyyy-MM-dd HH:mm:ss')) | Slack: $slackModeText" -NoTimestamp
+    Write-Log -Message "Служби: exchangAPI=$exchangAPIStatus | Apache=$apacheStatus" -NoTimestamp
+    
+}
 if ($apacheExtraMessages.Count -gt 0) {
     foreach ($apacheDetectionMessage in $apacheExtraMessages) {
         Write-Log -Message "Apache: $apacheDetectionMessage" -NoTimestamp
@@ -629,8 +648,8 @@ if ($script:EnableAutoShutdown) {
     Write-Log -Message "Автоматичне вимкнення: УВІМКНЕНО" -NoTimestamp
 }
 
-Write-Log -Message "Реставрація: $restoreStatus" -NoTimestamp
-Write-Log -Message "Перевірки: розмір .md=$(if ($CheckSize) {'увімкнено'} else {'вимкнено'}) | Умови: день=$isRestoreDay, після $RestoreTime=$isAfterRestoreTime" -NoTimestamp
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "Реставрація: $restoreStatus" -NoTimestamp }
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "Перевірки: розмір .md=$(if ($CheckSize) {'увімкнено'} else {'вимкнено'}) | Умови: день=$isRestoreDay, після $RestoreTime=$isAfterRestoreTime" -NoTimestamp }
 if ($HealthCheckOnly) {
     $healthResult = Invoke-BravoHealthCheck -SendSlack
     Close-BravoProgressState -Status $(if ($healthResult.HasCriticalIssues) {"CompletedWithErrors"} else {"Completed"})
@@ -639,8 +658,14 @@ if ($HealthCheckOnly) {
     Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $healthExitCode
     exit $healthExitCode
 }
-Write-Log -Message "==="
-Write-Log -Message "=== ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ ==="Set-BravoProgressStep -StepId "CHECK_FREE_SPACE" -StepName "Перевірка вільного місця"
+if ((Get-BravoConsoleStyle) -eq "modern") {
+    Write-BravoConsoleSection -Icon "File" -Title "ПЕРЕВІРКА ДИСКОВОГО ПРОСТОРУ"
+}
+else {
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "===" }
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "=== ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ ===" }
+}
+Set-BravoProgressStep -StepId "CHECK_FREE_SPACE" -StepName "Перевірка вільного місця"
 $spaceCheckResult = Check-FreeSpace -ROOT_LIMS $ROOT_LIMS
 
 # Перевірка критичних помилок після перевірки місця
@@ -690,9 +715,16 @@ if ($missingDirs.Count -gt 0 -or $global:criticalErrorOccurred) {
 }
 
 Complete-BravoProgressStep -StepId "CREATE_DIRECTORIES" -StepName "Створення необхідних директорій"
-# ===== ЗУПИНКА СЛУЖБ =====
-Write-Log -Message "==="
-Write-Log -Message "=== ЗУПИНКА СЛУЖБ ==="Set-BravoProgressStep -StepId "STOP_SERVICES" -StepName "Зупинка служб"
+if ((Get-BravoConsoleStyle) -eq "modern") {
+    Write-BravoConsoleSection -Icon "Stop" -Title "ЗУПИНКА СЛУЖБ"
+}
+else {
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "===" }
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "=== ЗУПИНКА СЛУЖБ ===" }
+}
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "===" }
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "=== ЗУПИНКА СЛУЖБ ===" }
+Set-BravoProgressStep -StepId "STOP_SERVICES" -StepName "Зупинка служб"
 
 # 1. Зупинка Apache
 if ($ApacheServiceExists -and $ApacheEnabled) {
@@ -710,7 +742,7 @@ if ($ApacheServiceExists -and $ApacheEnabled) {
             }
             
             if (-not (Get-Process "httpd" -ErrorAction SilentlyContinue)) {
-                Write-Log -Message "Apache: зупинено" -Level "SUCCESS"
+                if ((Get-BravoConsoleStyle) -eq "modern") { Write-BravoConsoleStatus -Name "Apache" -Status "ЗУПИНЕНО" } else { Write-Log -Message "Apache: зупинено" -Level "SUCCESS" }
             } else {
                 $errorMsg = "Не вдалося зупинити Apache"
                 Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -744,7 +776,7 @@ if ($exchangAPIService) {
         }
         
         if ((Get-Service -Name $ExchangAPIServiceName).Status -eq 'Stopped') {
-            Write-Log -Message "$($ExchangAPIServiceName): зупинено" -Level "SUCCESS"
+            if ((Get-BravoConsoleStyle) -eq "modern") { Write-BravoConsoleStatus -Name $ExchangAPIServiceName -Status "ЗУПИНЕНО" } else { Write-Log -Message "$($ExchangAPIServiceName): зупинено" -Level "SUCCESS" }
         } else {
             $errorMsg = "Не вдалося зупинити службу $ExchangAPIServiceName"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -809,7 +841,7 @@ try {
             }
             
             if ($serviceStatus -eq 'Stopped') {
-                Write-Log -Message "$($BravoServiceName): зупинено" -Level "SUCCESS"
+                if ((Get-BravoConsoleStyle) -eq "modern") { Write-BravoConsoleStatus -Name $BravoServiceName -Status "ЗУПИНЕНО" } else { Write-Log -Message "$($BravoServiceName): зупинено" -Level "SUCCESS" }
             } else {
                 $errorMsg = "$BravoServiceName не зупинився автоматично"
                 Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1011,6 +1043,31 @@ if ($bravoStatus -ne "Running") {
             return "$Name $Count $word"
         }
 
+        function Get-BravoNextSequencedName {
+            param(
+                [string]$SourcePath,
+                [string]$DestDir
+            )
+
+            $fileName = [System.IO.Path]::GetFileNameWithoutExtension($SourcePath)
+            $fileExt = [System.IO.Path]::GetExtension($SourcePath)
+
+            $existingFiles = Get-ChildItem -Path $DestDir -File -Filter "${fileName}_*$fileExt" -ErrorAction SilentlyContinue
+            $maxNumber = 0
+
+            foreach ($file in $existingFiles) {
+                if ($file.BaseName -match "${fileName}_(\d{6})$") {
+                    $num = [int]$Matches[1]
+                    if ($num -gt $maxNumber) {
+                        $maxNumber = $num
+                    }
+                }
+            }
+
+            $nextNumber = $maxNumber + 1
+            return "${fileName}_$($nextNumber.ToString('000000'))${fileExt}"
+        }
+
         $outFiles = @(
             Get-ChildItem -Path "$ROOT_LIMS" -Filter "*.out" -File -ErrorAction SilentlyContinue |
                 Where-Object { $_.Length -gt 0 }
@@ -1044,50 +1101,75 @@ if ($bravoStatus -ne "Running") {
         )
 
         if ($hasLogsToProcess) {
-            Write-Log -Message "==="
-            Write-Log -Message "=== ОБРОБКА ЛОГІВ ===" -Level "INFO"
+            $isModernConsole = ((Get-BravoConsoleStyle) -eq "modern")
+
+            if ($isModernConsole) {
+                Write-BravoConsoleSection -Icon "Logs" -Title "ОБРОБКА ТА РОТАЦІЯ ЛОГІВ"
+            }
+            else {
+                Write-Log -Message "==="
+                Write-Log -Message "=== ОБРОБКА ЛОГІВ ===" -Level "INFO"
+            }
 
             $traceMovedCount = 0
             $exchangAPIMovedCount = 0
             $apacheMovedCount = 0
             $wwwMovedCount = 0
 
-            if ($outFiles.Count -gt 0) {
-                Write-Log -Message "--- ОБРОБКА TRACE-ФАЙЛІВ ---" -Level "INFO"
+            foreach ($file in $outFiles) {
+                $targetName = Get-BravoNextSequencedName -SourcePath $file.FullName -DestDir $TRACE_ARCHIV_DIR
 
-                foreach ($file in $outFiles) {
-                    if (Move-WithSequence -sourcePath $file.FullName -destDir $TRACE_ARCHIV_DIR -SkipIfEmpty) {
-                        $traceMovedCount++
+                if (Move-WithSequence -sourcePath $file.FullName -destDir $TRACE_ARCHIV_DIR -SkipIfEmpty -Quiet) {
+                    $traceMovedCount++
+
+                    if ($isModernConsole) {
+                        Write-BravoConsoleMove -Type "[TRACE]" -From $file.Name -To $targetName
+                    }
+                    else {
+                        Write-Log -Message "Переміщено $($file.Name) до $targetName" -Level "SUCCESS"
                     }
                 }
             }
 
-            if ($exchangAPILogs.Count -gt 0) {
-                Write-Log -Message "--- ОБРОБКА ЛОГІВ EXCHANGAPI ---" -Level "INFO"
+            foreach ($file in $exchangAPILogs) {
+                if (Move-ExchangAPILogs -sourcePath $file.FullName -destDir $EXCHANGAPI_ARCHIV_DIR -Quiet) {
+                    $exchangAPIMovedCount++
 
-                foreach ($file in $exchangAPILogs) {
-                    if (Move-ExchangAPILogs -sourcePath $file.FullName -destDir $EXCHANGAPI_ARCHIV_DIR) {
-                        $exchangAPIMovedCount++
+                    if ($isModernConsole) {
+                        Write-BravoConsoleMove -Type "[EXCHANG]" -From $file.Name
+                    }
+                    else {
+                        Write-Log -Message "Переміщено $($file.Name)" -Level "SUCCESS"
                     }
                 }
             }
 
-            if ($apacheLogFiles.Count -gt 0) {
-                Write-Log -Message "--- ОБРОБКА ЛОГІВ APACHE ---" -Level "INFO"
+            foreach ($file in $apacheLogFiles) {
+                $targetName = Get-BravoNextSequencedName -SourcePath $file.FullName -DestDir $BRAVO_WEB_DAILY_DIR
 
-                foreach ($file in $apacheLogFiles) {
-                    if (Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty) {
-                        $apacheMovedCount++
+                if (Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty -Quiet) {
+                    $apacheMovedCount++
+
+                    if ($isModernConsole) {
+                        Write-BravoConsoleMove -Type "[APACHE]" -From $file.Name -To $targetName
+                    }
+                    else {
+                        Write-Log -Message "Переміщено $($file.Name) до $targetName" -Level "SUCCESS"
                     }
                 }
             }
 
-            if ($wwwLogFiles.Count -gt 0) {
-                Write-Log -Message "--- ОБРОБКА ЛОГІВ WWW ---" -Level "INFO"
+            foreach ($file in $wwwLogFiles) {
+                $targetName = Get-BravoNextSequencedName -SourcePath $file.FullName -DestDir $BRAVO_WEB_DAILY_DIR
 
-                foreach ($file in $wwwLogFiles) {
-                    if (Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty) {
-                        $wwwMovedCount++
+                if (Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty -Quiet) {
+                    $wwwMovedCount++
+
+                    if ($isModernConsole) {
+                        Write-BravoConsoleMove -Type "[WWW]" -From $file.Name -To $targetName
+                    }
+                    else {
+                        Write-Log -Message "Переміщено $($file.Name) до $targetName" -Level "SUCCESS"
                     }
                 }
             }
@@ -1111,10 +1193,15 @@ if ($bravoStatus -ne "Running") {
             }
 
             if ($summaryItems.Count -gt 0) {
-                Write-Log -Message ""
-                Write-Log -Message "Оброблено: $($summaryItems -join ', ')" -Level "SUCCESS"
+                if ($isModernConsole) {
+                    Write-BravoConsoleRaw -Message "" -Level "INFO"
+                    Write-BravoConsoleInfo -Message "[ІНФО] Оброблено: $($summaryItems -join ', ')" -Level "SUCCESS"
+                }
+                else {
+                    Write-Log -Message ""
+                    Write-Log -Message "Оброблено: $($summaryItems -join ', ')" -Level "SUCCESS"
+                }
             }
-
         }
         else {
             Write-Log -Message "Файлів логів для обробки не знайдено" -Level "DEBUG"
@@ -1139,8 +1226,14 @@ else {
 }
 
 # ===== ЗАПУСК СЕРВІСІВ =====
-Write-Log -Message "==="
-Write-Log -Message "=== ЗАПУСК СЛУЖБ ==="Set-BravoProgressStep -StepId "START_SERVICES" -StepName "Запуск служб"
+if ((Get-BravoConsoleStyle) -eq "modern") {
+    Write-BravoConsoleSection -Icon "Stop" -Title "ЗАПУСК СЛУЖБ"
+}
+else {
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "===" }
+if ((Get-BravoConsoleStyle) -ne "modern") { Write-Log -Message "=== ЗАПУСК СЛУЖБ ===" }
+}
+Set-BravoProgressStep -StepId "START_SERVICES" -StepName "Запуск служб"
 
 # 1. Запуск служби BRAVO
 try {
@@ -1158,7 +1251,7 @@ try {
         }
         
         if ($serviceStatus -eq 'Running') {
-            Write-Log -Message "$($BravoServiceName): запущено" -Level "SUCCESS"
+            if ((Get-BravoConsoleStyle) -eq "modern") { Write-BravoConsoleStatus -Name $BravoServiceName -Status "ЗАПУЩЕНО" } else { Write-Log -Message "$($BravoServiceName): запущено" -Level "SUCCESS" }
         } else {
             $errorMsg = "$BravoServiceName не запустився автоматично"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1187,7 +1280,7 @@ if ($exchangAPIService) {
         }
         
         if ((Get-Service -Name $ExchangAPIServiceName).Status -eq 'Running') {
-            Write-Log -Message "$($ExchangAPIServiceName): запущено" -Level "SUCCESS"
+            if ((Get-BravoConsoleStyle) -eq "modern") { Write-BravoConsoleStatus -Name $ExchangAPIServiceName -Status "ЗАПУЩЕНО" } else { Write-Log -Message "$($ExchangAPIServiceName): запущено" -Level "SUCCESS" }
         } else {
             $errorMsg = "$ExchangAPIServiceName не запустився автоматично"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1233,7 +1326,7 @@ if ($ApacheServiceExists -and $ApacheEnabled) {
             }
             
             if (Get-Process "httpd" -ErrorAction SilentlyContinue) {
-                Write-Log -Message "Apache: запущено" -Level "SUCCESS"
+                if ((Get-BravoConsoleStyle) -eq "modern") { Write-BravoConsoleStatus -Name "Apache" -Status "ЗАПУЩЕНО" } else { Write-Log -Message "Apache: запущено" -Level "SUCCESS" }
             } else {
                 $errorMsg = "Apache не запустився"
                 Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1401,16 +1494,27 @@ $totalTime = (Get-Date) - $global:ScriptStartTime
 
 # ФІНАЛЬНИЙ БЛОК ЗАВЕРШЕННЯ
 Close-BravoProgressState -Status $(if ($global:criticalErrorOccurred) {"CompletedWithErrors"} else {"Completed"})
-Write-Log -Message "==="
-Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАВЕРШИЛА РОБОТУ ==="
-Write-Log -Message "=== УСТАНОВА: $($global:ObjectName) ==="
-Write-Log -Message "=== ЧАС ВИКОНАННЯ: $(Format-Duration $totalTime) ==="
-Write-Log -Message "=== СТАТУС: $(if ($global:criticalErrorOccurred) {'З ПОМИЛКАМИ'} else {'УСПІШНО'}) ==="
-Write-Log -Message "==="
-
+if ((Get-BravoConsoleStyle) -eq "modern") {
+    $finalStatus = if ($global:criticalErrorOccurred) { "З ПОМИЛКАМИ" } else { "УСПІШНО" }
+    Write-BravoConsoleFinalLine -Status $finalStatus -Duration (Format-Duration $totalTime) -ObjectName $global:ObjectName
+}
+else {
+    Write-Log -Message "==="
+    Write-Log -Message "=== СИСТЕМА ОБСЛУГОВУВАННЯ BRAVOSOFT ЗАВЕРШИЛА РОБОТУ ==="
+    Write-Log -Message "=== УСТАНОВА: $($global:ObjectName) ==="
+    Write-Log -Message "=== ЧАС ВИКОНАННЯ: $(Format-Duration $totalTime) ==="
+    Write-Log -Message "=== СТАТУС: $(if ($global:criticalErrorOccurred) {'З ПОМИЛКАМИ'} else {'УСПІШНО'}) ==="
+    Write-Log -Message "==="
+    
+}
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
+
+
+
+
 
 
 

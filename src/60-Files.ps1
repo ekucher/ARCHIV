@@ -21,7 +21,8 @@ function Move-WithSequence {
     param(
         [string]$sourcePath,
         [string]$destDir,
-        [switch]$SkipIfEmpty
+        [switch]$SkipIfEmpty,
+        [switch]$Quiet
     )
     
     if (-not (Test-Path $sourcePath)) {
@@ -64,7 +65,9 @@ function Move-WithSequence {
 
     try {
         Move-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
-        Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath)) до $newName" -Level "SUCCESS"
+        if (-not $Quiet) {
+            Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath)) до $newName" -Level "SUCCESS"
+        }
         return $true
     }
     catch {
@@ -315,9 +318,17 @@ function Check-MdFileSizes {
         [string[]]$ExcludedFiles = @()
     )
 
-    Write-Log "==="
-    Write-Log "=== ПЕРЕВІРКА РОЗМІРІВ .MD ФАЙЛІВ ==="
-    Write-Log "Перевірка розмірів файлів .md..." -Level "INFO"
+    $isModernConsole = ((Get-BravoConsoleStyle) -eq "modern")
+
+    if ($isModernConsole) {
+        Write-BravoConsoleSection -Icon "File" -Title "ПЕРЕВІРКА РОЗМІРІВ .MD ФАЙЛІВ"
+        Write-BravoConsoleInfo -Message "Аналіз розмірів файлів у $MODEL_PATH..."
+    }
+    else {
+        Write-Log "==="
+        Write-Log "=== ПЕРЕВІРКА РОЗМІРІВ .MD ФАЙЛІВ ==="
+        Write-Log "Перевірка розмірів файлів .md..." -Level "INFO"
+    }
 
     if (-not (Test-Path $MODEL_PATH)) {
         $errorMsg = "Директорія моделі не знайдена: $MODEL_PATH"
@@ -372,7 +383,12 @@ function Check-MdFileSizes {
     }
 
     if ($displayExclusions.Count -gt 0) {
-        Write-Log "Виключення з перевірки .md файлів: $($displayExclusions -join ', ')" -Level "INFO"
+        if ($isModernConsole) {
+            Write-BravoConsoleInfo -Message "Виключення з перевірки: $($displayExclusions -join ', ')"
+        }
+        else {
+            Write-Log "Виключення з перевірки .md файлів: $($displayExclusions -join ', ')" -Level "INFO"
+        }
     }
 
     $allMdFiles = Get-ChildItem -Path $MODEL_PATH -Recurse -Filter "*.md" -File -ErrorAction SilentlyContinue
@@ -391,7 +407,12 @@ function Check-MdFileSizes {
     )
 
     if ($excludedMdFiles.Count -gt 0) {
-        Write-Log "Пропущено за виключеннями .md файлів: $($excludedMdFiles.Count)" -Level "INFO"
+        if ($isModernConsole) {
+            Write-BravoConsoleInfo -Message "Пропущено файлів за виключенням: $($excludedMdFiles.Count)"
+        }
+        else {
+            Write-Log "Пропущено за виключеннями .md файлів: $($excludedMdFiles.Count)" -Level "INFO"
+        }
 
         foreach ($file in $excludedMdFiles) {
             $relativePath = $file.FullName.Replace($MODEL_PATH, "").TrimStart('\')
@@ -412,19 +433,30 @@ function Check-MdFileSizes {
         $fileList = $fileListBuilder.ToString()
         $message = "Знайдено $($largeFiles.Count) файлів .md, розмір яких перевищує $($MAX_MD_FILE_SIZE / 1MB) МБ:`n$fileList"
 
+        if ($isModernConsole) {
+            Write-BravoConsoleInfo -Message "УВАГА: знайдено $($largeFiles.Count) .md файлів понад $($MAX_MD_FILE_SIZE / 1MB) МБ" -Level "WARNING"
+        }
+
         Write-Log $message -Level "WARNING"
         Send-SlackAlert -Message $message -IsCritical
     }
     else {
-        Write-Log "Файли .md з розміром більше $($MAX_MD_FILE_SIZE / 1MB) МБ не знайдено." -Level "INFO"
+        $message = "Файли .md з розміром більше $($MAX_MD_FILE_SIZE / 1MB) МБ не знайдено."
+
+        if ($isModernConsole) {
+            Write-BravoConsoleInfo -Message "Результат: $message" -Level "SUCCESS"
+        }
+        else {
+            Write-Log $message -Level "INFO"
+        }
     }
 }
-
 
 function Move-ExchangAPILogs {
     param(
         [string]$sourcePath,
-        [string]$destDir
+        [string]$destDir,
+        [switch]$Quiet
     )
     
     if (-not (Test-Path $sourcePath)) {
@@ -438,7 +470,9 @@ function Move-ExchangAPILogs {
     
     try {
         Move-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
-        Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath))" -Level "SUCCESS"
+        if (-not $Quiet) {
+            Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath))" -Level "SUCCESS"
+        }
         return $true
     }
     catch {
@@ -446,5 +480,6 @@ function Move-ExchangAPILogs {
         return $false
     }
 }
+
 
 

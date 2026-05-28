@@ -160,7 +160,12 @@ function Check-FreeSpace {
         
         # Одне повідомлення з потрібним форматом
         $logMessage = "Доступно вільного місця: $freeSpaceGB GB з $totalSpaceGB GB (Потрібно мінімум: $MIN_FREE_SPACE GB)"
-        Write-Log $logMessage -Level "INFO"
+        if ((Get-BravoConsoleStyle) -eq "modern") {
+            Write-BravoConsoleInfo -Message $logMessage -Level "INFO"
+        }
+        else {
+            Write-Log $logMessage -Level "INFO"
+        }
         
         if ($freeSpaceGB -lt $MIN_FREE_SPACE) {
             $errorMsg = "Недостатньо вільного місця на диску! Залишилось ${freeSpaceGB} GB, потрібно мінімум ${MIN_FREE_SPACE} GB"
@@ -263,4 +268,5 @@ function Wait-BravoInteractiveExit {
         }
     }
 }
+
 

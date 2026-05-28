@@ -96,10 +96,13 @@
     # classic = old output, modern = new DevOps-style output
     ConsoleStyle = "classic"
     ConsoleWidth = 80
-    ConsoleIcons = "emoji"     # emoji | ascii | off
+    ConsoleIcons = "ascii"     # ascii | emoji | off
     ConsoleLabelWidth = 12
     ConsoleStatusWidth = 12
+    ConsoleSectionSpacing = 1
 
 
 }
+
+
 

@@ -25,7 +25,7 @@ function Get-BravoConsoleWidth {
 }
 
 function Get-BravoConsoleIconsMode {
-    return [string](Get-BravoConsoleOption -Name "ConsoleIcons" -Default "emoji")
+    return [string](Get-BravoConsoleOption -Name "ConsoleIcons" -Default "ascii")
 }
 
 function Get-BravoConsoleStyle {
@@ -58,13 +58,13 @@ function Get-BravoConsoleIcon {
     }
 
     $ascii = @{
-        Search  = "?"
+        Search  = "*"
         Stop    = "!"
-        File    = "#"
+        File    = "*"
         Restore = "*"
-        Logs    = "%"
-        Start   = ">"
-        Cleanup = "-"
+        Logs    = "*"
+        Start   = "!"
+        Cleanup = "*"
         Success = "OK"
         Warning = "!"
         Error   = "X"
@@ -95,6 +95,27 @@ function Write-BravoConsoleRaw {
     }
 }
 
+function Format-BravoConsoleBoxContent {
+    param(
+        [string]$Text,
+        [int]$Width
+    )
+
+    $contentWidth = $Width - 4
+
+    if ($contentWidth -lt 10) {
+        $contentWidth = 10
+    }
+
+    $content = "  $Text"
+
+    if ($content.Length -gt $contentWidth) {
+        $content = $content.Substring(0, $contentWidth)
+    }
+
+    return "│" + $content.PadRight($contentWidth) + "  │"
+}
+
 function Write-BravoConsoleBox {
     param(
         [string]$Title,
@@ -102,33 +123,53 @@ function Write-BravoConsoleBox {
     )
 
     $width = Get-BravoConsoleWidth
-    $innerWidth = $width - 2
 
-    $safeTitle = " $Title "
-    $topFill = [Math]::Max(0, $innerWidth - $safeTitle.Length)
-    $top = "┌" + "───[" + $safeTitle + "]" + ("─" * [Math]::Max(0, $topFill - 4)) + "┐"
+    if ($width -lt 60) {
+        $width = 60
+    }
+
+    $innerWidth = $width - 2
+    $top = "┌" + ("─" * $innerWidth) + "┐"
     $bottom = "└" + ("─" * $innerWidth) + "┘"
 
     Write-BravoConsoleRaw -Message $top -Level "INFO"
+    Write-BravoConsoleRaw -Message (Format-BravoConsoleBoxContent -Text $Title -Width $width) -Level "INFO"
 
     foreach ($line in $Lines) {
-        $content = "  $line"
-        if ($content.Length -gt $innerWidth) {
-            $content = $content.Substring(0, $innerWidth)
-        }
-
-        $padding = " " * ($innerWidth - $content.Length)
-        Write-BravoConsoleRaw -Message "│$content$padding│" -Level "INFO"
+        Write-BravoConsoleRaw -Message (Format-BravoConsoleBoxContent -Text $line -Width $width) -Level "INFO"
     }
 
     Write-BravoConsoleRaw -Message $bottom -Level "INFO"
 }
 
+function Get-BravoConsoleSectionSpacing {
+    $spacing = [int](Get-BravoConsoleOption -Name "ConsoleSectionSpacing" -Default 1)
+
+    if ($spacing -lt 0) {
+        return 0
+    }
+
+    if ($spacing -gt 3) {
+        return 3
+    }
+
+    return $spacing
+}
+
+function Write-BravoConsoleSectionSpacing {
+    $spacing = Get-BravoConsoleSectionSpacing
+
+    for ($i = 0; $i -lt $spacing; $i++) {
+        Write-BravoConsoleRaw -Message "" -Level "INFO"
+    }
+}
 function Write-BravoConsoleSection {
     param(
         [string]$Title,
         [string]$Icon = "Info"
     )
+
+    Write-BravoConsoleSectionSpacing
 
     $iconText = Get-BravoConsoleIcon -Name $Icon
 
@@ -140,6 +181,15 @@ function Write-BravoConsoleSection {
     }
 }
 
+function Get-BravoConsoleBranchPrefix {
+    $mode = Get-BravoConsoleIconsMode
+
+    if ($mode -eq "emoji") {
+        return "↳"
+    }
+
+    return "->"
+}
 function Format-BravoConsoleStatusLine {
     param(
         [string]$Name,
@@ -157,9 +207,9 @@ function Format-BravoConsoleStatusLine {
     }
 
     $width = Get-BravoConsoleWidth
-    $prefix = "    ↳ "
+    $prefix = "    $(Get-BravoConsoleBranchPrefix) "
     $left = $Name.PadRight($NameWidth)
-    $statusText = "[ " + $Status.PadRight($StatusWidth) + " ]"
+    $statusText = "[" + $Status + "]"
     $dotsCount = $width - $prefix.Length - $left.Length - $statusText.Length - 1
 
     if ($dotsCount -lt 3) {
@@ -179,13 +229,62 @@ function Write-BravoConsoleStatus {
     Write-BravoConsoleRaw -Message (Format-BravoConsoleStatusLine -Name $Name -Status $Status) -Level $Level
 }
 
+function Format-BravoConsoleMoveLine {
+    param(
+        [string]$Type,
+        [string]$From,
+        [string]$To = "",
+        [string]$Status = "ПЕРЕМІЩЕНО"
+    )
+
+    $width = Get-BravoConsoleWidth
+    $prefix = "    $(Get-BravoConsoleBranchPrefix) "
+    $typeText = $Type.PadRight(12)
+
+    if ([string]::IsNullOrWhiteSpace($To)) {
+        $moveText = "$typeText $From"
+    }
+    else {
+        $moveText = "$typeText $From -> $To"
+    }
+
+    $statusText = "[$Status]"
+    $dotsCount = $width - $prefix.Length - $moveText.Length - $statusText.Length - 1
+
+    if ($dotsCount -lt 3) {
+        $dotsCount = 3
+    }
+
+    return $prefix + $moveText + ("." * $dotsCount) + " " + $statusText
+}
+
+function Write-BravoConsoleMove {
+    param(
+        [string]$Type,
+        [string]$From,
+        [string]$To = "",
+        [string]$Status = "ПЕРЕМІЩЕНО",
+        [string]$Level = "SUCCESS"
+    )
+
+    Write-BravoConsoleRaw -Message (Format-BravoConsoleMoveLine -Type $Type -From $From -To $To -Status $Status) -Level $Level
+}
+
+function Write-BravoConsoleInfo {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+
+    Write-BravoConsoleRaw -Message "    $(Get-BravoConsoleBranchPrefix) $Message" -Level $Level
+}
 function Write-BravoConsoleStep {
     param(
         [string]$Message,
         [string]$Level = "INFO"
     )
 
-    Write-BravoConsoleRaw -Message "    ↳ $Message" -Level $Level
+    Write-BravoConsoleRaw -Message "    $(Get-BravoConsoleBranchPrefix) $Message" -Level $Level
 }
 
 function Write-BravoConsoleFinalLine {
@@ -197,10 +296,22 @@ function Write-BravoConsoleFinalLine {
 
     $width = Get-BravoConsoleWidth
     $line = "─" * $width
-    $icon = Get-BravoConsoleIcon -Name "Success"
 
+    Write-BravoConsoleSectionSpacing
     Write-BravoConsoleRaw -Message $line -Level "INFO"
-    Write-BravoConsoleRaw -Message "[$icon] СТАТУС: $Status | ЧАС: $Duration | УСТАНОВА: $ObjectName" -Level "SUCCESS"
+
+    if ($Status -eq "УСПІШНО") {
+        $badge = "[ OK ]"
+        $badgeColor = "Green"
+    }
+    else {
+        $badge = "[ ERR ]"
+        $badgeColor = "Red"
+    }
+
+    Write-Host $badge -ForegroundColor $badgeColor -NoNewline
+    Write-Host " СТАТУС: $Status | ЧАС: $Duration | УСТАНОВА: $ObjectName" -ForegroundColor White
+
     Write-BravoConsoleRaw -Message $line -Level "INFO"
 }
 
@@ -293,3 +404,10 @@ switch ($Level) {
         Write-Host "Помилка запису у файл логу: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
+
+
+
+
+
+
+
