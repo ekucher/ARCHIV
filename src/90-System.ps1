@@ -196,3 +196,70 @@ function Check-FreeSpace {
         return $false
     }
 }
+
+function Test-BravoInteractiveConsole {
+    param([string]$TaskUserName)
+
+    if (-not [Environment]::UserInteractive) {
+        return $false
+    }
+
+    if ($env:SESSIONNAME -and $env:SESSIONNAME -ieq "Services") {
+        return $false
+    }
+
+    if ($Host.Name -eq "ServerRemoteHost") {
+        return $false
+    }
+
+    try {
+        if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) {
+            return $false
+        }
+    }
+    catch {
+        # Some hosts do not expose console redirection state reliably.
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($TaskUserName)) {
+        try {
+            $currentName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+            $currentLeaf = ($currentName -split "\\")[-1]
+            $taskLeaf = ($TaskUserName -split "\\")[-1]
+
+            if ($currentLeaf -ieq $taskLeaf) {
+                return $false
+            }
+        }
+        catch {
+            # Do not block execution if identity detection fails.
+        }
+    }
+
+    return $true
+}
+
+function Wait-BravoInteractiveExit {
+    param(
+        [string]$TaskUserName,
+        [int]$ExitCode = 0
+    )
+
+    if (-not (Test-BravoInteractiveConsole -TaskUserName $TaskUserName)) {
+        return
+    }
+
+    try {
+        Write-Host ""
+        Write-Host "Натисніть будь-яку клавішу для завершення..." -ForegroundColor Yellow
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    }
+    catch {
+        try {
+            [void](Read-Host "Натисніть Enter для завершення")
+        }
+        catch {
+            # Never block scheduler/non-console runs because of pause handling.
+        }
+    }
+}

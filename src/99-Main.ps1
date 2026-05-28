@@ -459,6 +459,7 @@ $progressMetadata = @{
 
 if ($ShowProgressState) {
     Show-BravoProgressState -StatePath $PROGRESS_STATE_FILE
+    Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode 0
     exit 0
 }
 
@@ -526,7 +527,9 @@ if ($HealthCheckOnly) {
     $healthResult = Invoke-BravoHealthCheck -SendSlack
     Close-BravoProgressState -Status $(if ($healthResult.HasCriticalIssues) {"CompletedWithErrors"} else {"Completed"})
     Send-FinalReport -LOG_FILE $LOG_FILE
-    exit $(if ($healthResult.HasCriticalIssues) {1} else {0})
+    $healthExitCode = $(if ($healthResult.HasCriticalIssues) {1} else {0})
+    Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $healthExitCode
+    exit $healthExitCode
 }
 Write-Log -Message "==="
 Write-Log -Message "=== ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ ==="Set-BravoProgressStep -StepId "CHECK_FREE_SPACE" -StepName "Перевірка вільного місця"
@@ -1193,4 +1196,6 @@ Write-Log -Message "=== ЧАС ВИКОНАННЯ: $(Format-Duration $totalTime)
 Write-Log -Message "=== СТАТУС: $(if ($global:criticalErrorOccurred) {'З ПОМИЛКАМИ'} else {'УСПІШНО'}) ==="
 Write-Log -Message "==="
 
-exit $(if ($global:criticalErrorOccurred) {1} else {0})
+$exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
+Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
+exit $exitCode
