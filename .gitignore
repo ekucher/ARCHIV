@@ -1,12 +1,16 @@
 # Логи
 *.log
-logs/
-Logs/
-LOGS/
-Trace/
-exchangAPI/
-LIMS/
-Modules/
+/dist/
+/dist/**
+/TEMP/
+/LOGS/
+/STATE/
+/Trace/
+/LIMS/
+/BLOG/
+/BRAVOEXCH/
+/BAZA/
+/exchangAPI/
 
 # Тимчасові файли
 tmp/
@@ -83,3 +87,8 @@ ARCHIV_BRAVO.ps1
 
 /dist/
 /dist/**
+
+# Keep source modules in Git
+!/Modules/
+!/Modules/**
+!/Modules/BRAVO.Credentials.ps1
