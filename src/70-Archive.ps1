@@ -246,7 +246,7 @@ function New-BravoVerifiedArchive {
             return $false
         }
 
-        Write-Log "${Description}: тимчасовий архів пройшов перевірку 7-Zip" -Level "SUCCESS"
+        Write-Log "${Description}: тимчасовий архів пройшов перевірку 7-Zip" -Level "DEBUG"
 
         if (Test-Path -LiteralPath $ArchivePath) {
             Write-Log "${Description}: фінальний архів уже існує і буде замінений після успішної перевірки: $ArchivePath" -Level "WARNING"
@@ -470,7 +470,7 @@ function Verify-Backup {
         "$hash *$fileName" | Out-File -FilePath $shaFile -Encoding ASCII
         
         # Повний шлях до архіву без зайвого розширення
-        Write-Log "Контрольна сума архіву збережена для -> $ArchivePath" -Level "SUCCESS"
+        Write-Log "Контрольна сума архіву збережена для -> $ArchivePath" -Level "DEBUG"
     }
     catch {
         Write-Log "ПОМИЛКА: Помилка перевірки архіву $fileName - $($_.Exception.Message)" -Level "ERROR"

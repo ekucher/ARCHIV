@@ -86,12 +86,12 @@ function Invoke-CommandWithLog {
         [string]$Description
     )
     
-    Write-Log "$Description..." -Level "INFO"
+    Write-Log "$Description..." -Level "DEBUG"
     $output = & $Command $Arguments 2>&1 | Out-String
     $formattedOutput = Format-CommandOutput -Output $output
     
     if ($LASTEXITCODE -eq 0) {
-        Write-Log "$Description успішно завершено" -Level "SUCCESS"
+        Write-Log "$Description успішно завершено" -Level "DEBUG"
     } else {
         $errorMsg = "ПОМИЛКА під час $Description. Код: $LASTEXITCODE"
         Write-Log $errorMsg -Level "ERROR"
@@ -263,3 +263,4 @@ function Wait-BravoInteractiveExit {
         }
     }
 }
+
