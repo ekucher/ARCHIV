@@ -69,3 +69,6 @@ Desktop.ini
 # Generated monolith
 /BRAVO_MAINTENANCE.ps1
 /BRAVO_MAINTENANCE.ps1.sha512
+
+# Runtime archived Apache/Br-a-vo.web logs
+/Br-a-vo.web/
