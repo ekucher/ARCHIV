@@ -876,7 +876,7 @@ if ($bravoStatus -ne "Running") {
         $outFiles = Get-ChildItem -Path "$ROOT_LIMS" -Filter "*.out" -ErrorAction SilentlyContinue
         if ($outFiles) {
             foreach ($file in $outFiles) {
-                Move-WithSequence -sourcePath $file.FullName -destDir $TRACE_ARCHIV_DIR -SkipIfEmpty
+                $null = Move-WithSequence -sourcePath $file.FullName -destDir $TRACE_ARCHIV_DIR -SkipIfEmpty
             }
             Write-Log -Message "Оброблено $($outFiles.Count) trace-файлів" -Level "SUCCESS"
         } else {
@@ -889,7 +889,7 @@ if ($bravoStatus -ne "Running") {
         $exchangAPILogs = Get-ChildItem -Path "$ROOT_LIMS" -Filter "exchangAPI_*.log" -ErrorAction SilentlyContinue
         if ($exchangAPILogs) {
             foreach ($file in $exchangAPILogs) {
-                Move-ExchangAPILogs -sourcePath $file.FullName -destDir $EXCHANGAPI_ARCHIV_DIR
+                $null = Move-ExchangAPILogs -sourcePath $file.FullName -destDir $EXCHANGAPI_ARCHIV_DIR
             }
         Write-Log -Message "Оброблено $($exchangAPILogs.Count) лог-файлів exchangAPI" -Level "SUCCESS"
             } else {
@@ -904,7 +904,7 @@ if ($bravoStatus -ne "Running") {
             
             if ($apacheLogFiles) {
                 foreach ($file in $apacheLogFiles) {
-                    Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty
+                    $null = Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty
                 }
                 Write-Log -Message "Оброблено $($apacheLogFiles.Count) Apache файлів" -Level "SUCCESS"
             } else {
@@ -920,7 +920,7 @@ if ($bravoStatus -ne "Running") {
             
             if ($wwwLogFiles) {
                 foreach ($file in $wwwLogFiles) {
-                    Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty
+                    $null = Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty
                 }
                 Write-Log -Message "Оброблено $($wwwLogFiles.Count) WWW файлів" -Level "SUCCESS"
             } else {
@@ -1219,3 +1219,4 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
