@@ -360,18 +360,51 @@ if ($osVersion.Major -lt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -lt
     exit 1
 }
 
-# Автоматична перевірка наявності директорії BRAVO_WEB
+# Автоматичне визначення каталогу BRAVO_WEB
 $ApacheEnabled = $false
-if ($ApacheServiceExists -and (Test-Path $BRAVO_WEB_DIR)) {
-    $Apache = "$BRAVO_WEB_DIR\apache\bin\httpd.exe"
-    
-    # Перевірка наявності Apache та лог-директорій
-    $ApacheExists = Test-Path $Apache
-    $ApacheLogsExist = (Test-Path "$BRAVO_WEB_DIR\apache\logs") -and (Test-Path "$BRAVO_WEB_DIR\www\log")
-    $ApacheEnabled = $ApacheExists -and $ApacheLogsExist
-    if (-not $ApacheEnabled) {
-        Write-Host "Apache не знайдено або відсутні лог-директорії - обробка логів вимкнена"
+$ApacheWebDirExists = $false
+
+$bravoWebCandidates = [System.Collections.Generic.List[string]]::new()
+
+if (-not [string]::IsNullOrWhiteSpace($BRAVO_WEB_DIR)) {
+    $bravoWebCandidates.Add($BRAVO_WEB_DIR)
+}
+
+$bravoWebCandidates.Add("C:\Br-a-vo.web")
+$bravoWebCandidates.Add("D:\Br-a-vo.web")
+$bravoWebCandidates.Add("E:\Br-a-vo.web")
+
+$detectedBravoWebDir = $bravoWebCandidates |
+    Select-Object -Unique |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+
+if ($detectedBravoWebDir) {
+    if ($BRAVO_WEB_DIR -ne $detectedBravoWebDir) {
+        Write-Host "Каталог Br-a-vo.web визначено автоматично: $detectedBravoWebDir" -ForegroundColor Yellow
     }
+
+    $BRAVO_WEB_DIR = [string]$detectedBravoWebDir
+    $ApacheWebDirExists = $true
+}
+
+if ($ApacheServiceExists -and $ApacheWebDirExists) {
+    $Apache = "$BRAVO_WEB_DIR\apache\bin\httpd.exe"
+
+    $ApacheExists = Test-Path -LiteralPath $Apache
+    $ApacheLogsExist = (Test-Path -LiteralPath "$BRAVO_WEB_DIR\apache\logs") -and (Test-Path -LiteralPath "$BRAVO_WEB_DIR\www\log")
+    $ApacheEnabled = $true
+
+    if (-not $ApacheExists) {
+        Write-Host "Apache service знайдено, але httpd.exe не знайдено: $Apache" -ForegroundColor Yellow
+    }
+
+    if (-not $ApacheLogsExist) {
+        Write-Host "Apache service знайдено, але лог-директорії Apache/WWW відсутні - обробка логів буде пропущена" -ForegroundColor Yellow
+    }
+}
+elseif ($ApacheServiceExists -and -not $ApacheWebDirExists) {
+    Write-Host "Apache service знайдено, але каталог Br-a-vo.web не знайдено - керування Apache вимкнено" -ForegroundColor Yellow
 }
 
 # Автоматичне визначення кореня LIMS
