@@ -986,62 +986,138 @@ if ($bravoStatus -ne "Running") {
     # Обробка лог-файлів (об'єднаний етап)
     Set-BravoProgressStep -StepId "PROCESS_LOG_FILES" -StepName "Обробка лог-файлів"
     try {
-        Write-Log -Message "==="
-        # Обробка trace-файлів
-        Write-Log -Message "=== ОБРОБКА TRACE-ФАЙЛІВ ===" -Level "INFO"
-        $outFiles = Get-ChildItem -Path "$ROOT_LIMS" -Filter "*.out" -ErrorAction SilentlyContinue
-        if ($outFiles) {
-            foreach ($file in $outFiles) {
-                $null = Move-WithSequence -sourcePath $file.FullName -destDir $TRACE_ARCHIV_DIR -SkipIfEmpty
+        function Format-BravoLogCount {
+            param(
+                [string]$Name,
+                [int]$Count
+            )
+
+            $lastTwoDigits = $Count % 100
+            $lastDigit = $Count % 10
+
+            if ($lastTwoDigits -ge 11 -and $lastTwoDigits -le 14) {
+                $word = "файлів"
             }
-            Write-Log -Message "Оброблено $($outFiles.Count) trace-файлів" -Level "SUCCESS"
-        } else {
-            Write-Log -Message "[ІНФО] Немає trace-файлів для обробки" -Level "INFO"
-        }
-        
-        # Обробка логів exchangAPI
-        Write-Log "==="
-        Write-Log -Message "=== ОБРОБКА ЛОГІВ EXCHANGAPI ===" -Level "INFO"
-        $exchangAPILogs = Get-ChildItem -Path "$ROOT_LIMS" -Filter "exchangAPI_*.log" -ErrorAction SilentlyContinue
-        if ($exchangAPILogs) {
-            foreach ($file in $exchangAPILogs) {
-                $null = Move-ExchangAPILogs -sourcePath $file.FullName -destDir $EXCHANGAPI_ARCHIV_DIR
+            elseif ($lastDigit -eq 1) {
+                $word = "файл"
             }
-        Write-Log -Message "Оброблено $($exchangAPILogs.Count) лог-файлів exchangAPI" -Level "SUCCESS"
-            } else {
-        Write-Log -Message "[ІНФО] Немає лог-файлів exchangAPI для обробки" -Level "INFO"
+            elseif ($lastDigit -ge 2 -and $lastDigit -le 4) {
+                $word = "файли"
+            }
+            else {
+                $word = "файлів"
+            }
+
+            return "$Name $Count $word"
         }
-		
-        # Обробка логів Apache
-        if ($ApacheServiceExists -and $ApacheEnabled) {
-            Write-Log -Message "=== ОБРОБКА ЛОГІВ APACHE ===" -Level "INFO"
-            $apacheLogFiles = Get-ChildItem -Path $APACHE_LOGS_DIR -File -ErrorAction SilentlyContinue | 
+
+        $outFiles = @(
+            Get-ChildItem -Path "$ROOT_LIMS" -Filter "*.out" -File -ErrorAction SilentlyContinue |
                 Where-Object { $_.Length -gt 0 }
-            
-            if ($apacheLogFiles) {
+        )
+
+        $exchangAPILogs = @(
+            Get-ChildItem -Path "$ROOT_LIMS" -Filter "exchangAPI_*.log" -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Length -gt 0 }
+        )
+
+        $apacheLogFiles = @()
+        $wwwLogFiles = @()
+
+        if ($ApacheServiceExists -and $ApacheEnabled) {
+            $apacheLogFiles = @(
+                Get-ChildItem -Path $APACHE_LOGS_DIR -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Length -gt 0 }
+            )
+
+            $wwwLogFiles = @(
+                Get-ChildItem -Path $WWW_LOGS_DIR -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Length -gt 0 }
+            )
+        }
+
+        $hasLogsToProcess = (
+            $outFiles.Count -gt 0 -or
+            $exchangAPILogs.Count -gt 0 -or
+            $apacheLogFiles.Count -gt 0 -or
+            $wwwLogFiles.Count -gt 0
+        )
+
+        if ($hasLogsToProcess) {
+            Write-Log -Message "==="
+            Write-Log -Message "=== ОБРОБКА ЛОГІВ ===" -Level "INFO"
+
+            $traceMovedCount = 0
+            $exchangAPIMovedCount = 0
+            $apacheMovedCount = 0
+            $wwwMovedCount = 0
+
+            if ($outFiles.Count -gt 0) {
+                Write-Log -Message "--- ОБРОБКА TRACE-ФАЙЛІВ ---" -Level "INFO"
+
+                foreach ($file in $outFiles) {
+                    if (Move-WithSequence -sourcePath $file.FullName -destDir $TRACE_ARCHIV_DIR -SkipIfEmpty) {
+                        $traceMovedCount++
+                    }
+                }
+            }
+
+            if ($exchangAPILogs.Count -gt 0) {
+                Write-Log -Message "--- ОБРОБКА ЛОГІВ EXCHANGAPI ---" -Level "INFO"
+
+                foreach ($file in $exchangAPILogs) {
+                    if (Move-ExchangAPILogs -sourcePath $file.FullName -destDir $EXCHANGAPI_ARCHIV_DIR) {
+                        $exchangAPIMovedCount++
+                    }
+                }
+            }
+
+            if ($apacheLogFiles.Count -gt 0) {
+                Write-Log -Message "--- ОБРОБКА ЛОГІВ APACHE ---" -Level "INFO"
+
                 foreach ($file in $apacheLogFiles) {
-                    $null = Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty
+                    if (Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty) {
+                        $apacheMovedCount++
+                    }
                 }
-                Write-Log -Message "Оброблено $($apacheLogFiles.Count) Apache файлів" -Level "SUCCESS"
-            } else {
-                Write-Log -Message "[ІНФО] Немає Apache файлів для обробки" -Level "INFO"
             }
-        }
-        
-        # Обробка логів WWW
-        if ($ApacheServiceExists -and $ApacheEnabled) {
-            Write-Log -Message "=== ОБРОБКА ЛОГІВ WWW ===" -Level "INFO"
-            $wwwLogFiles = Get-ChildItem -Path $WWW_LOGS_DIR -File -ErrorAction SilentlyContinue | 
-                Where-Object { $_.Length -gt 0 }
-            
-            if ($wwwLogFiles) {
+
+            if ($wwwLogFiles.Count -gt 0) {
+                Write-Log -Message "--- ОБРОБКА ЛОГІВ WWW ---" -Level "INFO"
+
                 foreach ($file in $wwwLogFiles) {
-                    $null = Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty
+                    if (Move-WithSequence -sourcePath $file.FullName -destDir $BRAVO_WEB_DAILY_DIR -SkipIfEmpty) {
+                        $wwwMovedCount++
+                    }
                 }
-                Write-Log -Message "Оброблено $($wwwLogFiles.Count) WWW файлів" -Level "SUCCESS"
-            } else {
-                Write-Log -Message "[ІНФО] Немає WWW файлів для обробки" -Level "INFO"
             }
+
+            $summaryItems = [System.Collections.Generic.List[string]]::new()
+
+            if ($apacheMovedCount -gt 0) {
+                $summaryItems.Add((Format-BravoLogCount -Name "Apache" -Count $apacheMovedCount)) | Out-Null
+            }
+
+            if ($exchangAPIMovedCount -gt 0) {
+                $summaryItems.Add((Format-BravoLogCount -Name "exchangAPI" -Count $exchangAPIMovedCount)) | Out-Null
+            }
+
+            if ($traceMovedCount -gt 0) {
+                $summaryItems.Add((Format-BravoLogCount -Name "Trace" -Count $traceMovedCount)) | Out-Null
+            }
+
+            if ($wwwMovedCount -gt 0) {
+                $summaryItems.Add((Format-BravoLogCount -Name "WWW" -Count $wwwMovedCount)) | Out-Null
+            }
+
+            if ($summaryItems.Count -gt 0) {
+                Write-Log -Message ""
+                Write-Log -Message "Оброблено: $($summaryItems -join ', ')" -Level "SUCCESS"
+            }
+
+        }
+        else {
+            Write-Log -Message "Файлів логів для обробки не знайдено" -Level "DEBUG"
         }
     }
     catch {
@@ -1335,6 +1411,10 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
+
+
+
 
 
 

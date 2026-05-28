@@ -438,7 +438,7 @@ function Move-ExchangAPILogs {
     
     try {
         Move-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
-        Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath)) до $destDir" -Level "SUCCESS"
+        Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath))" -Level "SUCCESS"
         return $true
     }
     catch {
@@ -446,4 +446,5 @@ function Move-ExchangAPILogs {
         return $false
     }
 }
+
 
