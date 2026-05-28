@@ -305,12 +305,6 @@ if ($DisableAllSlack) {
     $script:SlackMode = $SlackMode  # Використовуємо глобальне значення за замовчуванням
     #Write-Host "Режим Slack: ВИМКНЕНО (none) - за замовчуванням" -ForegroundColor Yellow
 }
-
-
-
-
-# Функція форматування часу
-
 # Перетворення числового дня в об'єкт DayOfWeek
 $restoreDayMap = @{
     1 = [DayOfWeek]::Monday
@@ -323,17 +317,6 @@ $restoreDayMap = @{
 }
 $RestoreDayOfWeek = $restoreDayMap[$RestoreDay]
 $RestoreDayName = $RestoreDayOfWeek.ToString()
-
-# Функція відправки Slack сповіщень
-
-# Функція форматування виводу команд
-
-# Функція форматування розміру файлу
-
-# Функція переміщення файлів з послідовністю
-
-# Функція порівняння розмірів файлів
-
 # Функція відновлення з архіву (для відкату при помилках)
 
 # Функція виконання команд з логуванням
