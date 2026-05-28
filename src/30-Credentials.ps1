@@ -726,7 +726,7 @@ function Write-BootstrapLog {
     Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
 }
 
-function Initialize-BravoCredentialApi {
+function Initialize-BravoCredentialBootstrapApi {
     if ("BravoCredentialNativeBootstrap" -as [type]) {
         return
     }
@@ -777,7 +777,7 @@ function Save-BravoWindowsCredentialBootstrap {
         [string]$Secret
     )
 
-    Initialize-BravoCredentialApi
+    Initialize-BravoCredentialBootstrapApi
 
     $secretBytes = [System.Text.Encoding]::Unicode.GetBytes($Secret)
 
