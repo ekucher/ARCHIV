@@ -80,3 +80,6 @@ ARCHIV_BRAVO.ps1
 /*.csv
 /*.mdz
 /*.sha512
+
+/dist/
+/dist/**
