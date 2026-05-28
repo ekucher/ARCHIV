@@ -1,0 +1,96 @@
+﻿name: BRAVO Build Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build monolith and validate syntax
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show PowerShell version
+        shell: powershell
+        run: |
+          $PSVersionTable
+
+      - name: Validate source module syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $files = Get-ChildItem -LiteralPath ".\src" -Filter "*.ps1" -File | Sort-Object Name
+
+          foreach ($file in $files) {
+              Write-Host "Parsing source module: $($file.FullName)"
+
+              $tokens = $null
+              $errors = $null
+
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                  $file.FullName,
+                  [ref]$tokens,
+                  [ref]$errors
+              ) | Out-Null
+
+              if ($errors -and $errors.Count -gt 0) {
+                  $errors | ForEach-Object {
+                      Write-Host ("Line {0}, Column {1}: {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) -ForegroundColor Red
+                  }
+
+                  throw "Syntax validation failed for source module: $($file.FullName)"
+              }
+          }
+
+          Write-Host "All source modules parsed successfully."
+
+      - name: Build monolith
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
+
+      - name: Verify build outputs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $scriptPath = ".\dist\BRAVO_MAINTENANCE.ps1"
+          $shaPath = ".\dist\BRAVO_MAINTENANCE.ps1.sha512"
+
+          if (-not (Test-Path -LiteralPath $scriptPath)) {
+              throw "Build output not found: $scriptPath"
+          }
+
+          if (-not (Test-Path -LiteralPath $shaPath)) {
+              throw "SHA512 file not found: $shaPath"
+          }
+
+          $tokens = $null
+          $errors = $null
+
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $scriptPath).Path,
+              [ref]$tokens,
+              [ref]$errors
+          ) | Out-Null
+
+          if ($errors -and $errors.Count -gt 0) {
+              $errors | ForEach-Object {
+                  Write-Host ("Line {0}, Column {1}: {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message) -ForegroundColor Red
+              }
+
+              throw "Syntax validation failed for built monolith: $scriptPath"
+          }
+
+          Write-Host "Build output verified successfully."
