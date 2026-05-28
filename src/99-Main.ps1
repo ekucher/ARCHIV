@@ -699,18 +699,18 @@ if ($ApacheServiceExists -and $ApacheEnabled) {
     try {
         $apacheProcess = Get-Process "httpd" -ErrorAction SilentlyContinue
         if ($apacheProcess) {
-            Write-Log -Message "Зупинка служби Apache..." -Level "INFO"
+            Write-Log -Message "Зупинка служби Apache..." -Level "DEBUG"
             Start-Process $Apache -ArgumentList "-k stop" -Wait
             Start-Sleep -Seconds 3
             
             if (Get-Process "httpd" -ErrorAction SilentlyContinue) {
-                Write-Log -Message "Примусове завершення Apache..." -Level "INFO"
+                Write-Log -Message "Примусове завершення Apache..." -Level "DEBUG"
                 Stop-Process -Name "httpd" -Force
                 Start-Sleep -Seconds 2
             }
             
             if (-not (Get-Process "httpd" -ErrorAction SilentlyContinue)) {
-                Write-Log -Message "Apache успішно зупинено" -Level "SUCCESS"
+                Write-Log -Message "Apache: зупинено" -Level "SUCCESS"
             } else {
                 $errorMsg = "Не вдалося зупинити Apache"
                 Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -719,7 +719,7 @@ if ($ApacheServiceExists -and $ApacheEnabled) {
             }
         }
         else {
-            Write-Log -Message "Apache вже зупинений - операція не потрібна" -Level "INFO"
+            Write-Log -Message "Apache: вже зупинено" -Level "INFO"
         }
     } catch {
         $errorMsg = "Помилка при зупинці Apache: $($_.Exception.Message)"
@@ -734,7 +734,7 @@ $exchangAPIService = Get-Service -Name $ExchangAPIServiceName -ErrorAction Silen
 if ($exchangAPIService) {
     $serviceStatus = $exchangAPIService.Status
     if ($serviceStatus -eq 'Running') {
-        Write-Log -Message "Зупинка служби $ExchangAPIServiceName..." -Level "INFO"
+        Write-Log -Message "Зупинка служби $ExchangAPIServiceName..." -Level "DEBUG"
         Stop-Service -Name $ExchangAPIServiceName -Force -WarningAction SilentlyContinue
         
         $waitTime = 30
@@ -744,7 +744,7 @@ if ($exchangAPIService) {
         }
         
         if ((Get-Service -Name $ExchangAPIServiceName).Status -eq 'Stopped') {
-            Write-Log -Message "Служба $ExchangAPIServiceName успішно зупинена" -Level "SUCCESS"
+            Write-Log -Message "$($ExchangAPIServiceName): зупинено" -Level "SUCCESS"
         } else {
             $errorMsg = "Не вдалося зупинити службу $ExchangAPIServiceName"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -752,17 +752,17 @@ if ($exchangAPIService) {
             $global:criticalErrorOccurred = $true
         }
     } else {
-        Write-Log -Message "Служба $ExchangAPIServiceName вже зупинена" -Level "INFO"
+        Write-Log -Message "$($ExchangAPIServiceName): вже зупинено" -Level "INFO"
     }
 } else {
     $exchangAPIProcess = Get-Process -Name $ExchangAPIProcessName -ErrorAction SilentlyContinue
     if ($exchangAPIProcess) {
-        Write-Log -Message "Зупинка процесу $ExchangAPIProcessName..." -Level "INFO"
+        Write-Log -Message "Зупинка процесу $ExchangAPIProcessName..." -Level "DEBUG"
         $exchangAPIProcess | Stop-Process -Force
         Start-Sleep -Seconds 2
         
         if (-not (Get-Process -Name $ExchangAPIProcessName -ErrorAction SilentlyContinue)) {
-            Write-Log -Message "Процес $ExchangAPIProcessName успішно зупинено" -Level "SUCCESS"
+            Write-Log -Message "$($ExchangAPIProcessName): процес зупинено" -Level "SUCCESS"
         } else {
             $errorMsg = "Не вдалося зупинити процес $ExchangAPIProcessName"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -770,7 +770,7 @@ if ($exchangAPIService) {
             $global:criticalErrorOccurred = $true
         }
     } else {
-        Write-Log -Message "Процес $ExchangAPIProcessName не знайдено (не запущений)" -Level "INFO"
+        Write-Log -Message "$($ExchangAPIProcessName): процес не знайдено / не запущено" -Level "INFO"
     }
 }
 
@@ -784,14 +784,14 @@ try {
         $serviceStatus = (Get-Service -Name $BravoServiceName).Status
         
         if ($serviceStatus -eq 'Running') {
-            Write-Log -Message "Зупинка служби $BravoServiceName..." -Level "INFO"
+            Write-Log -Message "Зупинка служби $BravoServiceName..." -Level "DEBUG"
             
             # Завершення додаткових процесів
             $processNames = @("Bis")
             foreach ($procName in $processNames) {
                 $process = Get-Process -Name $procName -ErrorAction SilentlyContinue
                 if ($process) {
-                    Write-Log -Message "Завершення процесу $procName..." -Level "INFO"
+                    Write-Log -Message "Завершення процесу $procName..." -Level "DEBUG"
                     $process | Stop-Process -Force
                     Start-Sleep -Seconds 1
                 }
@@ -809,7 +809,7 @@ try {
             }
             
             if ($serviceStatus -eq 'Stopped') {
-                Write-Log -Message "Служба $BravoServiceName успішно зупинена" -Level "SUCCESS"
+                Write-Log -Message "$($BravoServiceName): зупинено" -Level "SUCCESS"
             } else {
                 $errorMsg = "$BravoServiceName не зупинився автоматично"
                 Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -818,7 +818,7 @@ try {
             }
         }
         else {
-            Write-Log -Message "Служба $BravoServiceName вже зупинена" -Level "INFO"
+            Write-Log -Message "$($BravoServiceName): вже зупинено" -Level "INFO"
         }
     } else {
         $errorMsg = "СЕРВІС BRAVO НЕ ЗНАЙДЕНО! Перевірте налаштування"
@@ -1069,7 +1069,7 @@ Write-Log -Message "=== ЗАПУСК СЛУЖБ ==="Set-BravoProgressStep -StepI
 # 1. Запуск служби BRAVO
 try {
     if ($bravoService -and (Get-Service -Name $BravoServiceName).Status -ne 'Running') {
-        Write-Log -Message "Запуск служби $BravoServiceName..." -Level "INFO"
+        Write-Log -Message "Запуск служби $BravoServiceName..." -Level "DEBUG"
         Start-Service -Name $BravoServiceName -WarningAction SilentlyContinue
         
         $timeout = 60
@@ -1082,7 +1082,7 @@ try {
         }
         
         if ($serviceStatus -eq 'Running') {
-            Write-Log -Message "Служба $BravoServiceName успішно запущена" -Level "SUCCESS"
+            Write-Log -Message "$($BravoServiceName): запущено" -Level "SUCCESS"
         } else {
             $errorMsg = "$BravoServiceName не запустився автоматично"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1101,7 +1101,7 @@ try {
 if ($exchangAPIService) {
     $serviceStatus = (Get-Service -Name $ExchangAPIServiceName).Status
     if ($serviceStatus -ne 'Running') {
-        Write-Log -Message "Запуск служби $ExchangAPIServiceName..." -Level "INFO"
+        Write-Log -Message "Запуск служби $ExchangAPIServiceName..." -Level "DEBUG"
         Start-Service -Name $ExchangAPIServiceName -WarningAction SilentlyContinue
         
         $waitTime = 30
@@ -1111,7 +1111,7 @@ if ($exchangAPIService) {
         }
         
         if ((Get-Service -Name $ExchangAPIServiceName).Status -eq 'Running') {
-            Write-Log -Message "Служба $ExchangAPIServiceName успішно запущена" -Level "SUCCESS"
+            Write-Log -Message "$($ExchangAPIServiceName): запущено" -Level "SUCCESS"
         } else {
             $errorMsg = "$ExchangAPIServiceName не запустився автоматично"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1119,16 +1119,16 @@ if ($exchangAPIService) {
             $global:criticalErrorOccurred = $true
         }
     } else {
-        Write-Log -Message "Служба $ExchangAPIServiceName вже запущена" -Level "INFO"
+        Write-Log -Message "$($ExchangAPIServiceName): вже запущено" -Level "INFO"
     }
 } else {
     if (Test-Path $ExchangAPIExePath) {
-        Write-Log -Message "Запуск процесу $ExchangAPIProcessName..." -Level "INFO"
+        Write-Log -Message "Запуск процесу $ExchangAPIProcessName..." -Level "DEBUG"
         Start-Process -FilePath $ExchangAPIExePath -WindowStyle Hidden
         
         Start-Sleep -Seconds 3
         if (Get-Process -Name $ExchangAPIProcessName -ErrorAction SilentlyContinue) {
-            Write-Log -Message "Процес $ExchangAPIProcessName успішно запущено" -Level "SUCCESS"
+            Write-Log -Message "$($ExchangAPIProcessName): процес запущено" -Level "SUCCESS"
         } else {
             $errorMsg = "Не вдалося запустити процес $ExchangAPIProcessName"
             Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1146,18 +1146,18 @@ if ($exchangAPIService) {
 if ($ApacheServiceExists -and $ApacheEnabled) {
     try {
         if (-not (Get-Process "httpd" -ErrorAction SilentlyContinue)) {
-            Write-Log -Message "Запуск служби Apache..." -Level "INFO"
+            Write-Log -Message "Запуск служби Apache..." -Level "DEBUG"
             Start-Process $Apache -ArgumentList "-D SSL -k start" -Wait
             Start-Sleep -Seconds 3
             
             if (-not (Get-Process "httpd" -ErrorAction SilentlyContinue)) {
-                Write-Log -Message "Спроба альтернативного запуску Apache..." -Level "INFO"
+                Write-Log -Message "Спроба альтернативного запуску Apache..." -Level "DEBUG"
                 Start-Process $Apache -ArgumentList "-k start" -Wait
                 Start-Sleep -Seconds 3
             }
             
             if (Get-Process "httpd" -ErrorAction SilentlyContinue) {
-                Write-Log -Message "Служба Apache успішно запущена" -Level "SUCCESS"
+                Write-Log -Message "Apache: запущено" -Level "SUCCESS"
             } else {
                 $errorMsg = "Apache не запустився"
                 Write-Log -Message "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -1335,6 +1335,8 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
+
+
 
 
 
