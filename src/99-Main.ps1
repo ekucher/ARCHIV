@@ -317,12 +317,6 @@ $restoreDayMap = @{
 }
 $RestoreDayOfWeek = $restoreDayMap[$RestoreDay]
 $RestoreDayName = $RestoreDayOfWeek.ToString()
-# >>> BRAVO_VERIFIED_ARCHIVE BEGIN
-# --------------------------------
-# Safe archive creation: temp archive -> 7-Zip test -> final move
-# --------------------------------
-
-# <<< BRAVO_VERIFIED_ARCHIVE END
 # Перевірка версії ОС
 $osVersion = [System.Environment]::OSVersion.Version
 if ($osVersion.Major -lt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -lt 3)) {
