@@ -1,4 +1,4 @@
-name: PowerShell syntax and build check
+﻿name: PowerShell syntax and build check
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check root monolith syntax
         shell: powershell
