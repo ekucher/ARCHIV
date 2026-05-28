@@ -1,94 +1,57 @@
-# Логи
-*.log
+# Build artifacts
 /dist/
 /dist/**
+
+# Runtime data
+/BAZA/
+/BLOG/
+/BRAVOEXCH/
+/exchangAPI/
+/LIMS/
+/LOGS/
+/STATE/
 /TEMP/
-/LOGS/
-/STATE/
-/Trace/
-/LIMS/
-/BLOG/
-/BRAVOEXCH/
-/BAZA/
-/exchangAPI/
-
-# Тимчасові файли
-tmp/
-temp/
-*.tmp
-*.bak
-*.old
-*.out
-
-# PowerShell debug / transcript
-PowerShell_transcript.*
-*.trace
-
-# Локальні налаштування
-*.local.ps1
-*.secrets.ps1
-.env
-.env.*
-!.env.example
-
-# Credentials / ключі / сертифікати
-*credential*
-*credentials*
-*.Credentials.ps1
-BRAVO.Credentials.ps1
-BRAVO.config.local.ps1
-BRAVO.config.ps1
-*.key
-*.pem
-*.pfx
-*.cer
-
-# Архіви / пакети
-*.zip
-*.7z
-*.rar
-*.tar
-*.gz
-
-# Windows / IDE
-Thumbs.db
-Desktop.ini
-.vscode/
-.idea/
-
-# ===== BRAVO / ARCHIV runtime data =====
-/BAZA/
-/BLOG/
-/BRAVOEXCH/
-/exchangAPI/
-/LIMS/
-/LOGS/
-/STATE/
 /Trace/
 
 # Local configs / secrets
 /BRAVO.config.ps1
 /ARCHIV_BRAVO.config.ps1
 /BRAVO.Credentials.ps1
+*.local.ps1
+*.secrets.ps1
+.env
+.env.*
 
-# Patch / backup files
-/Apply-BRAVO-*.ps1
-/*.bak_*
-/*.tmp
-
-ARCHIV_BRAVO.cmd
-ARCHIV_BRAVO.ps1
-
-# Logs / generated reports
-/*.log
-/*.csv
-/*.mdz
-/*.sha512
-
-/dist/
-/dist/**
+# Credentials / keys / certificates
+*credential*
+*credentials*
+*.Credentials.ps1
+*.key
+*.pem
+*.pfx
+*.cer
 
 # Keep source modules in Git
 !/Modules/
 !/Modules/**
 !/Modules/BRAVO.Credentials.ps1
+
+# Patch / backup files
+/Apply-BRAVO-*.ps1
+/*.bak_*
+*.bak
+*.old
+*.tmp
+*.out
+
+# Generated files
+/*.log
+/*.csv
+/*.mdz
+/*.sha512
+
+# Windows / IDE
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
