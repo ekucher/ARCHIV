@@ -26,13 +26,13 @@ function Move-WithSequence {
     
     if (-not (Test-Path $sourcePath)) {
         Write-Log "[ПОМИЛКА] Файл $([System.IO.Path]::GetFileName($sourcePath)) не знайдено" -Level "ERROR"
-        return
+        return $false
     }
     
     $fileInfo = Get-Item $sourcePath
     if ($fileInfo.Length -eq 0 -and $SkipIfEmpty) {
         Write-Log "[ІНФО] Пропущено порожній файл: $([System.IO.Path]::GetFileName($sourcePath))" -Level "INFO"
-        return
+        return $false
     }
     
     New-Item -Path $destDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
@@ -55,7 +55,7 @@ function Move-WithSequence {
 
     if ($nextNumber -gt 999999) {
         Write-Log "[ERROR] Досягнуто максимальну кількість архівних файлів (999999) для $fileName" -Level "ERROR"
-        return
+        return $false
     }
 
     $suffix = $nextNumber.ToString("000000")
@@ -63,11 +63,13 @@ function Move-WithSequence {
     $destPath = Join-Path -Path $destDir -ChildPath $newName
 
     try {
-        Move-Item -Path $sourcePath -Destination $destPath -Force
+        Move-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
         Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath)) до $newName" -Level "SUCCESS"
+        return $true
     }
     catch {
-        Write-Log "[ERROR] Помилка переміщення $([System.IO.Path]::GetFileName($sourcePath)): $_" -Level "ERROR"
+        Write-Log "[WARNING] Не вдалося перемістити $([System.IO.Path]::GetFileName($sourcePath)): $($_.Exception.Message)" -Level "WARNING"
+        return $false
     }
 }
 
@@ -170,10 +172,27 @@ function Process-Logs {
     
     New-Item -Path $DestDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
     
+    $movedCount = 0
+    $skippedCount = 0
+
     foreach ($file in $logFiles) {
-        Move-WithSequence -sourcePath $file.FullName -destDir $DestDir -SkipIfEmpty
+        $moved = Move-WithSequence -sourcePath $file.FullName -destDir $DestDir -SkipIfEmpty
+
+        if ($moved) {
+            $movedCount++
+        }
+        else {
+            $skippedCount++
+        }
     }
-    Write-Log "Оброблено $($logFiles.Count) $LogType файлів" -Level "SUCCESS"
+
+    if ($movedCount -gt 0) {
+        Write-Log "Оброблено $movedCount $LogType файлів" -Level "SUCCESS"
+    }
+
+    if ($skippedCount -gt 0) {
+        Write-Log "Пропущено $skippedCount $LogType файлів, які не вдалося перемістити" -Level "WARNING"
+    }
 }
 
 function Remove-OldDirectories {
@@ -418,10 +437,12 @@ function Move-ExchangAPILogs {
     $destPath = Join-Path -Path $destDir -ChildPath ([System.IO.Path]::GetFileName($sourcePath))
     
     try {
-        Move-Item -Path $sourcePath -Destination $destPath -Force
+        Move-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
         Write-Log "Переміщено $([System.IO.Path]::GetFileName($sourcePath)) до $destDir" -Level "SUCCESS"
+        return $true
     }
     catch {
-        Write-Log "[ERROR] Помилка переміщення $([System.IO.Path]::GetFileName($sourcePath)): $_" -Level "ERROR"
+        Write-Log "[WARNING] Не вдалося перемістити $([System.IO.Path]::GetFileName($sourcePath)): $($_.Exception.Message)" -Level "WARNING"
+        return $false
     }
 }
