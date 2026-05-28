@@ -1,6 +1,7 @@
 ﻿{
     "files":  [
                   "src/05-Params.ps1",
+                  "src/10-Config.ps1",
                   "src/20-Logging.ps1",
                   "src/99-Main.ps1"
               ]
