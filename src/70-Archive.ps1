@@ -74,7 +74,7 @@ function Invoke-Bravo7ZipSafe {
         }
 
         if ($exitCode -eq 0) {
-            Write-Log "$Description успішно завершено" -Level "SUCCESS"
+            Write-Log "$Description успішно завершено" -Level "DEBUG"
         }
         elseif ($exitCode -eq 1) {
             Write-Log "$Description завершено з попередженнями. Код: $exitCode" -Level "WARNING"
@@ -263,7 +263,7 @@ function New-BravoVerifiedArchive {
             throw "Final archive was not found after move: $ArchivePath"
         }
 
-        Write-Log "${Description}: архів перевірено та перенесено в основне сховище: $ArchivePath" -Level "SUCCESS"
+        Write-Log "${Description}: архів перевірено та перенесено в основне сховище: $ArchivePath" -Level "DEBUG"
         return $true
     }
     catch {
@@ -451,7 +451,7 @@ function Verify-Backup {
         [string]$ArchivePath
     )
     
-    Write-Log "Перевірка контрольних сум архіву: $([System.IO.Path]::GetFileName($ArchivePath))" -Level "INFO"
+    Write-Log "Перевірка контрольних сум архіву: $([System.IO.Path]::GetFileName($ArchivePath))" -Level "DEBUG"
     
     if (-not (Test-Path $ArchivePath)) {
         $errorMsg = "Архів не знайдено: $ArchivePath"
@@ -479,3 +479,4 @@ function Verify-Backup {
 
     return $valid
 }
+
