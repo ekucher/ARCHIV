@@ -1692,6 +1692,62 @@ function New-SHA512Hash {
     }
 }
 
+
+function Test-SHA512Hash {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$HashFilePath,
+
+        [string]$ArchiveType = "ARCHIVE"
+    )
+
+    if ($global:DryRun) {
+        Write-Log "DRY-RUN: перевiрка SHA512 пропущена: $(Split-Path $FilePath -Leaf)" -Level "WARNING"
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        Write-Log "Файл для перевiрки SHA512 не знайдено: $FilePath" -Level "ERROR"
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $HashFilePath)) {
+        Write-Log "SHA512 файл не знайдено: $HashFilePath" -Level "ERROR"
+        return $false
+    }
+
+    try {
+        Set-ArchivWindowTitle -Stage "SHA512 test $ArchiveType"
+
+        Write-Log "Перевiрка контрольної суми SHA512: $(Split-Path $FilePath -Leaf)" -Level "INFO"
+
+        $hashLine = (Get-Content -LiteralPath $HashFilePath -Raw).Trim()
+        if ([string]::IsNullOrWhiteSpace($hashLine)) {
+            Write-Log "SHA512 файл порожнiй: $HashFilePath" -Level "ERROR"
+            return $false
+        }
+
+        $expectedHash = ($hashLine -split '\s+')[0].Trim().ToLower()
+        $actualHash = (Get-FileHash -Path $FilePath -Algorithm SHA512).Hash.ToLower()
+
+        if ($actualHash -eq $expectedHash) {
+            Write-Log "Контрольна сума SHA512 збiгається: $(Split-Path $FilePath -Leaf)" -Level "SUCCESS"
+            return $true
+        }
+
+        Write-Log "Контрольна сума SHA512 НЕ збiгається: $(Split-Path $FilePath -Leaf)" -Level "ERROR"
+        Write-Log "Очiкувано: $expectedHash" -Level "ERROR" -LogOnly
+        Write-Log "Фактично:  $actualHash" -Level "ERROR" -LogOnly
+        return $false
+    } catch {
+        Write-Log "Помилка перевiрки SHA512: $($_.Exception.Message)" -Level "ERROR"
+        return $false
+    }
+}
+
 # =============================================
 # ФУНКЦІЇ МЕРЕЖІ ТА SFTP
 # =============================================
@@ -2445,6 +2501,7 @@ function New-ArchivJsonReport {
                 compression_ratio_pct   = Get-ArchivCompressionRatio -SourceSizeBytes $sourceSizeBytes -ArchiveSizeBytes $archiveSizeBytes
                 archive_success         = $archiveSuccess
                 hash_success            = $hashSuccess
+                hash_verify_success     = if ($result) { [bool]$result.HashVerifySuccess } else { $false }
             }
         }
 
@@ -2535,13 +2592,12 @@ function Main {
     Write-Log "Режим логування: $LogLevel" -NoTimestamp
     Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Iсторiя запускiв: $(Join-Path $logPath 'history.json')" -NoTimestamp
-    Write-Log "Веб-панель: заплановано на майбутнє" -NoTimestamp
     Write-Log "DRY-RUN: $(if ($global:DryRun) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Параметри для 7-Zip: $safeArchiveParams" -NoTimestamp
     Write-Log "Перевiрка архiвiв 7-Zip: $(if ($enableArchiveIntegrityTest) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
-    Write-Log "Копiювання в мережу: $(if ($enableNetworkCopy) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
-    Write-Log "Синхронiзацiя BAZA в мережу: $(if ($excludeComponents.BAZA_Network) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
-    Write-Log "Синхронiзацiя BAZA локальна: $(if ($excludeComponents.BAZA) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
+    if ($enableNetworkCopy) { Write-Log "Копiювання в мережу: УВIМКНЕНО" -NoTimestamp } else { Write-Log "Копiювання в мережу: ВИМКНЕНО" -Level "DEBUG" -LogOnly }
+    if (-not $excludeComponents.BAZA_Network) { Write-Log "Синхронiзацiя BAZA в мережу: УВIМКНЕНО" -NoTimestamp } else { Write-Log "Синхронiзацiя BAZA в мережу: ВИМКНЕНО" -Level "DEBUG" -LogOnly }
+    if (-not $excludeComponents.BAZA) { Write-Log "Синхронiзацiя BAZA локальна: УВIМКНЕНО" -NoTimestamp } else { Write-Log "Синхронiзацiя BAZA локальна: ВИМКНЕНО" -Level "DEBUG" -LogOnly }
     Write-Log "==="
     
     # ОЧИЩЕННЯ СТАРИХ ЛОГІВ - виконується в кінці
@@ -2608,10 +2664,11 @@ function Main {
     $results = @{}
     
     Write-Log "=== АРХIВАЦIЯ ТА СТВОРЕННЯ ХЕШУ ==="
-    Write-Log "Параметри перевiрки мiсця: резерв=$freeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
-        
+    $effectiveFreeSpaceReserveGB = if ($null -ne $freeSpaceReserveGB -and "$freeSpaceReserveGB" -ne "") { $freeSpaceReserveGB } elseif ($null -ne $archiveMinFreeSpaceGB -and "$archiveMinFreeSpaceGB" -ne "") { $archiveMinFreeSpaceGB } else { 0 }
+    Write-Log "Параметри перевiрки мiсця: резерв=$effectiveFreeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
     foreach ($archive in $archives) {
         Set-ArchivWindowTitle -Stage "Архiвацiя $($archive.Type)"
+        Write-Log "" -NoTimestamp
         Write-Log "--- АРХIВАЦIЯ $($archive.Type) ---"
 
         $success = New-Archive `
@@ -2626,21 +2683,33 @@ function Main {
         
         if ($success) {
             Set-ArchivWindowTitle -Stage "SHA512 $($archive.Type)"
+            Write-Log "" -NoTimestamp
             Write-Log "--- СТВОРЕННЯ ХЕШУ $($archive.Type) ---"
             $archivePath = Join-Path $archive.Destination $archive.Name
             $hashPath = "$archivePath.sha512"
             $hashSuccess = New-SHA512Hash -FilePath $archivePath -HashFilePath $hashPath
+            $hashVerifySuccess = $false
+            if ($hashSuccess) {
+                Set-ArchivWindowTitle -Stage "SHA512 test $($archive.Type)"
+                Write-Log "" -NoTimestamp
+                Write-Log "--- ПЕРЕВIРКА SHA512 $($archive.Type) ---"
+                $hashVerifySuccess = Test-SHA512Hash -FilePath $archivePath -HashFilePath $hashPath -ArchiveType $archive.Type
+            }
             
             $results[$archive.Type] = @{
                 ArchivePath = $archivePath
                 HashPath = $hashPath
                 ArchiveSuccess = $success
-                HashSuccess = $hashSuccess
+                HashSuccess = ($hashSuccess -and $hashVerifySuccess)
+                HashCreated = $hashSuccess
+                HashVerifySuccess = $hashVerifySuccess
             }
         } else {
             $results[$archive.Type] = @{
                 ArchiveSuccess = $false
                 HashSuccess = $false
+                HashCreated = $false
+                HashVerifySuccess = $false
             }
         }
     }
@@ -2775,6 +2844,8 @@ function Main {
     }
     
     Set-ArchivWindowTitle -Stage "Синхронiзацiя BAZA"
+    # >>> BAZA CONSOLE VISIBILITY PATCH: BEGIN
+    if ((-not $excludeComponents.BAZA) -or ((-not $excludeComponents.BAZA_Network) -and $enableNetworkCopy)) {
     Write-Log "=== СИНХРОНІЗАЦІЯ ФАЙЛІВ BAZA ==="
     
     # Синхронізація BAZA (тільки якщо не вимкнена)
@@ -2816,6 +2887,11 @@ function Main {
     
     # Очищення старих архівів
     Set-ArchivWindowTitle -Stage "Очищення старих архiвiв"
+    } else {
+        Write-Log "Синхронiзацiя BAZA вимкнена в налаштуваннях" -Level "DEBUG" -LogOnly
+    }
+    # <<< BAZA CONSOLE VISIBILITY PATCH: END
+
     if ($global:DryRun -and $enableArchiveDeletion) {
         Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ==="
         Write-Log "DRY-RUN: очищення старих архiвiв пропущено" -Level "WARNING"
@@ -2914,32 +2990,32 @@ function Main {
     if ($enableSFTPUpload -and -not $global:DryRun) {
         Write-Log "Завантаження на SFTP: $(if ($uploadSuccess -eq $uploadTotal -and $uploadTotal -gt 0) {'успiшно'} elseif ($uploadTotal -eq 0) {'немає файлів'} else {'$uploadSuccess з $uploadTotal'})" -NoTimestamp
     } else {
-        Write-Log "Завантаження на SFTP: вимкнено" -NoTimestamp
+        Write-Log "Завантаження на SFTP: вимкнено" -Level "DEBUG" -LogOnly
     }
     
     Set-ArchivWindowTitle -Stage "Копiювання в мережу"
     if ($enableNetworkCopy -and -not $global:DryRun) {
         Write-Log "Завантаження в мережеву папку: $(if ($copySuccess -eq $copyTotal -and $copyTotal -gt 0) {'успiшно'} elseif ($copyTotal -eq 0) {'немає файлів'} else {'$copySuccess з $copyTotal'})" -NoTimestamp
     } else {
-        Write-Log "Завантаження в мережеву папку: вимкнено" -NoTimestamp
+        Write-Log "Завантаження в мережеву папку: вимкнено" -Level "DEBUG" -LogOnly
     }
     
     if ($global:DryRun -and -not $excludeComponents.BAZA) {
         Write-Log "DRY-RUN: локальна синхронiзацiя BAZA пропущена" -Level "WARNING"
         $syncLocalSuccess = $true
     } elseif (-not $excludeComponents.BAZA) {
-        Write-Log "Локальна сихронізація BAZA: $(if ($syncLocalSuccess) {'успiшна'} else {'з помилками'})" -NoTimestamp
+        Write-Log "Локальна синхронiзацiя BAZA: $(if ($syncLocalSuccess) {'успiшна'} else {'з помилками'})" -NoTimestamp
     } else {
-        Write-Log "Локальна сихронізація BAZA: вимкнено" -NoTimestamp
+        Write-Log "Локальна синхронiзацiя BAZA: вимкнено" -Level "DEBUG" -LogOnly
     }
     
     if ($global:DryRun -and -not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
         Write-Log "DRY-RUN: мережева синхронiзацiя BAZA пропущена" -Level "WARNING"
         $syncNetworkSuccess = $true
     } elseif (-not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
-        Write-Log "Мережева сихронізація BAZA: $(if ($syncNetworkSuccess) {'успiшна'} else {'з помилками'})" -NoTimestamp
+        Write-Log "Мережева синхронiзацiя BAZA: $(if ($syncNetworkSuccess) {'успiшна'} else {'з помилками'})" -NoTimestamp
     } else {
-        Write-Log "Мережева сихронізація BAZA: вимкнено" -NoTimestamp
+        Write-Log "Мережева синхронiзацiя BAZA: вимкнено" -Level "DEBUG" -LogOnly
     }
     
     Write-Log "" -NoTimestamp
