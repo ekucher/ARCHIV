@@ -1197,7 +1197,7 @@ function Test-FreeSpaceForArchive {
 
     Write-Log "Розмiр джерела: $(Format-FileSize -Bytes $sourceSizeBytes)" -Level "INFO"
     Write-Log "Вiльно на диску архiву: $(Format-FileSize -Bytes $freeBytes)" -Level "INFO"
-    Write-Log "Потрiбний резерв: $(Format-FileSize -Bytes $requiredBytes) (max: джерело x $ReserveMultiplier або $MinFreeSpaceGB GB)" -Level "INFO"
+    
 
     if ($freeBytes -lt $requiredBytes) {
         $missingBytes = $requiredBytes - $freeBytes
@@ -1648,7 +1648,6 @@ function Process-NetworkCopy {
             
             # Копіюємо хеш-файл
             Write-Log "--- КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ ХЕШУ АРХІВУ $archiveType ---"
-Write-Log "Параметри перевiрки мiсця: резерв=$archiveMinFreeSpaceGB GB; множник=$archiveReserveMultiplier" -Level "INFO"
             $hashCopy = Copy-ToNetworkDrive -SourcePath $Results[$archiveType].HashPath -DestinationFolder $targetFolder
             if ($hashCopy) { $copySuccess++ }
             
@@ -1759,6 +1758,8 @@ function Main {
     $results = @{}
     
     Write-Log "=== АРХIВАЦIЯ ТА СТВОРЕННЯ ХЕШУ ==="
+    Write-Log "Параметри перевiрки мiсця: резерв=$freeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
+    Write-Log "Вiльно на диску архiву: $(Format-FileSize -Bytes $freeBytes)" -Level "INFO"
     
     foreach ($archive in $archives) {
         Write-Log "--- АРХIВАЦIЯ $($archive.Type) ---"
