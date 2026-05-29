@@ -315,6 +315,33 @@ function Write-BravoConsoleFinalLine {
     Write-BravoConsoleRaw -Message $line -Level "INFO"
 }
 
+
+function Write-BravoLogFileEntry {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO",
+        [switch]$NoTimestamp
+    )
+
+    if ($NoTimestamp) {
+        $logEntry = $Message
+    }
+    else {
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $logEntry = "[$timestamp] [$Level] $Message"
+    }
+
+    try {
+        if (-not (Test-Path $LOG_DIR)) {
+            New-Item -ItemType Directory -Path $LOG_DIR -Force | Out-Null
+        }
+
+        $logEntry | Out-File -FilePath $LOG_FILE -Append -Encoding UTF8
+    }
+    catch {
+        Write-Host "Помилка запису у файл логу: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
 function Write-Log {
     param(
         [string]$Message,
@@ -344,6 +371,42 @@ function Write-Log {
         return
     }
     
+    # Modern console rendering for legacy Write-Log messages
+    if ((Get-BravoConsoleStyle) -eq "modern") {
+        if ([string]::IsNullOrWhiteSpace($Message)) {
+            Write-BravoConsoleRaw -Message "" -Level "INFO"
+            Write-BravoLogFileEntry -Message $Message -Level $Level -NoTimestamp:$NoTimestamp
+            return
+        }
+
+        if ($Message -eq "=" -or $Message -eq "===") {
+            Write-BravoLogFileEntry -Message ("=" * $SeparatorLength) -NoTimestamp
+            return
+        }
+
+        if ($Message -match "^=== (.+) ===$") {
+            $sectionTitle = $Matches[1]
+
+            switch ($sectionTitle) {
+                "РЕСТАВРАЦІЯ МОДЕЛІ" {
+                    Write-BravoConsoleSection -Icon "Restore" -Title "РЕСТАВРАЦІЯ МОДЕЛІ"
+                }
+                "ОЧИСТКА СТАРИХ ДАНИХ" {
+                    Write-BravoConsoleSection -Icon "Cleanup" -Title "ОЧИСТКА ЗАСТАРІЛИХ ДАНИХ"
+                }
+                default {
+                    Write-BravoConsoleSection -Icon "Info" -Title $sectionTitle
+                }
+            }
+
+            Write-BravoLogFileEntry -Message $Message -Level $Level -NoTimestamp:$NoTimestamp
+            return
+        }
+
+        Write-BravoConsoleInfo -Message $Message -Level $Level
+        Write-BravoLogFileEntry -Message $Message -Level $Level -NoTimestamp:$NoTimestamp
+        return
+    }
     # Обробка спеціальних повідомлень-роздільників
     if ($Message -eq "=" -or $Message -eq "===") {
         $separator = "=" * $SeparatorLength
@@ -404,6 +467,7 @@ switch ($Level) {
         Write-Host "Помилка запису у файл логу: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
+
 
 
 
