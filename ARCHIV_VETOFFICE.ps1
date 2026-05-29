@@ -650,6 +650,21 @@ function Write-Log {
         # Генеруємо роздільник з 100 знаками "="
         $separator = "=" * 100
         
+        # Для консолi використовуємо короткий формат без дати/часу.
+        
+        # У файл логу нижче записується повний $logEntry з timestamp.
+        
+        if ($NoTimestamp) {
+        
+            $consoleEntry = $Message
+        
+        } else {
+        
+            $consoleEntry = "[$Level] $Message"
+        
+        }
+
+        
         # Виводимо в консоль тiльки якщo не LogOnly
         if (-not $LogOnly) {
             Write-Host $separator -ForegroundColor White
@@ -724,14 +739,29 @@ function Write-Log {
         $logEntry = "[$timestamp] [$Level] $Message"
     }
     
+    # Для консолi використовуємо короткий формат без дати/часу.
+    
+    # У файл логу нижче записується повний $logEntry з timestamp.
+    
+    if ($NoTimestamp) {
+    
+        $consoleEntry = $Message
+    
+    } else {
+    
+        $consoleEntry = "[$Level] $Message"
+    
+    }
+
+    
     # Виводимо в консоль тiльки якщo не LogOnly
     if (-not $LogOnly) {
         switch ($Level) {
-            "SUCCESS" { Write-Host $logEntry -ForegroundColor Green }
-            "ERROR"   { Write-Host $logEntry -ForegroundColor Red }
-            "WARNING" { Write-Host $logEntry -ForegroundColor Yellow }
-            "DEBUG"   { Write-Host $logEntry -ForegroundColor Gray }
-            default   { Write-Host $logEntry -ForegroundColor White }
+            "SUCCESS" { Write-Host $consoleEntry -ForegroundColor Green }
+            "ERROR"   { Write-Host $consoleEntry -ForegroundColor Red }
+            "WARNING" { Write-Host $consoleEntry -ForegroundColor Yellow }
+            "DEBUG"   { Write-Host $consoleEntry -ForegroundColor Gray }
+            default   { Write-Host $consoleEntry -ForegroundColor White }
         }
     }
     
