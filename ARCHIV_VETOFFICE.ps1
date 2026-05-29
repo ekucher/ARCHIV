@@ -1995,12 +1995,170 @@ function Set-ArchivWindowTitle {
 # ОСНОВНА ЛОГІКА
 # =============================================
 
+# >>> JSON REPORT PATCH: BEGIN
+function Get-ArchivFileSizeSafe {
+    param([string]$Path)
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($Path) -and (Test-Path -LiteralPath $Path)) {
+            return [int64](Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+        }
+    } catch {
+    }
+
+    return $null
+}
+
+function Get-ArchivCompressionRatio {
+    param(
+        [Nullable[Int64]]$SourceSizeBytes,
+        [Nullable[Int64]]$ArchiveSizeBytes
+    )
+
+    if ($null -eq $SourceSizeBytes -or $null -eq $ArchiveSizeBytes) {
+        return $null
+    }
+
+    if ($SourceSizeBytes -le 0) {
+        return $null
+    }
+
+    return [math]::Round(($ArchiveSizeBytes / $SourceSizeBytes) * 100, 2)
+}
+
+function New-ArchivJsonReport {
+    param(
+        [Parameter(Mandatory=$true)]
+        [datetime]$StartedAt,
+
+        [Parameter(Mandatory=$true)]
+        [datetime]$FinishedAt,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Results,
+
+        [Parameter(Mandatory=$true)]
+        [array]$Archives,
+
+        [string]$ReportPath
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($ReportPath)) {
+            $ReportPath = [System.IO.Path]::ChangeExtension($global:logFile, ".json")
+        }
+
+        $duration = $FinishedAt - $StartedAt
+        $archiveReports = @()
+
+        foreach ($archive in $Archives) {
+            $type = [string]$archive.Type
+            $archivePath = Join-Path $archive.Destination $archive.Name
+            $hashPath = "$archivePath.sha512"
+
+            $result = $null
+            if ($Results -and $Results.ContainsKey($type)) {
+                $result = $Results[$type]
+            }
+
+            $sourceSizeBytes = Get-PathSizeBytes -Path $archive.Source
+            $archiveSizeBytes = Get-ArchivFileSizeSafe -Path $archivePath
+            $hashSizeBytes = Get-ArchivFileSizeSafe -Path $hashPath
+
+            $archiveSuccess = $false
+            $hashSuccess = $false
+
+            if ($result) {
+                $archiveSuccess = [bool]$result.ArchiveSuccess
+                $hashSuccess = [bool]$result.HashSuccess
+            }
+
+            $archiveReports += [PSCustomObject]@{
+                type                    = $type
+                source_path             = $archive.Source
+                source_size_bytes       = $sourceSizeBytes
+                source_size_text        = if ($null -ne $sourceSizeBytes) { Format-FileSize -Bytes $sourceSizeBytes } else { $null }
+                archive_name            = $archive.Name
+                archive_path            = $archivePath
+                archive_size_bytes      = $archiveSizeBytes
+                archive_size_text       = if ($null -ne $archiveSizeBytes) { Format-FileSize -Bytes $archiveSizeBytes } else { $null }
+                hash_path               = $hashPath
+                hash_size_bytes         = $hashSizeBytes
+                compression_ratio_pct   = Get-ArchivCompressionRatio -SourceSizeBytes $sourceSizeBytes -ArchiveSizeBytes $archiveSizeBytes
+                archive_success         = $archiveSuccess
+                hash_success            = $hashSuccess
+            }
+        }
+
+        $sftpStatus = if ($enableSFTPUpload) {
+            if ($global:DryRun) { "dry_run_skipped" } else { "enabled" }
+        } else {
+            "disabled"
+        }
+
+        $networkStatus = if ($enableNetworkCopy) {
+            if ($global:DryRun) { "dry_run_skipped" } else { "enabled" }
+        } else {
+            "disabled"
+        }
+
+        $report = [PSCustomObject]@{
+            script_name              = "ARCHIV_VETOFFICE"
+            script_version           = $ScriptVersion
+            script_date              = $ScriptDate
+            hostname                 = $env:COMPUTERNAME
+            username                 = $env:USERNAME
+            started_at               = $StartedAt.ToString("yyyy-MM-ddTHH:mm:ss")
+            finished_at              = $FinishedAt.ToString("yyyy-MM-ddTHH:mm:ss")
+            duration_seconds         = [math]::Round($duration.TotalSeconds, 3)
+            duration_text            = $duration.ToString("hh\:mm\:ss")
+            dry_run                  = [bool]$global:DryRun
+            root_path                = $rootPath
+            config_path              = $configPath
+            log_file                 = $global:logFile
+            report_file              = $ReportPath
+            archive_prefix           = $archivePrefix
+            archive_params           = if ($safeArchiveParams) { $safeArchiveParams } else { $archiveParams }
+            free_space_reserve_gb    = $freeSpaceReserveGB
+            archive_space_multiplier = $archiveSpaceMultiplier
+            archives                 = $archiveReports
+            sftp                     = [PSCustomObject]@{
+                enabled = [bool]$enableSFTPUpload
+                status  = $sftpStatus
+            }
+            network_copy             = [PSCustomObject]@{
+                enabled = [bool]$enableNetworkCopy
+                status  = $networkStatus
+            }
+            baza_sync                = [PSCustomObject]@{
+                local_enabled   = -not [bool]$excludeComponents.BAZA
+                network_enabled = (-not [bool]$excludeComponents.BAZA_Network) -and [bool]$enableNetworkCopy
+            }
+        }
+
+        $reportDir = Split-Path -Parent $ReportPath
+        if (-not (Test-Path -LiteralPath $reportDir)) {
+            New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
+        }
+
+        $json = $report | ConvertTo-Json -Depth 8
+        [System.IO.File]::WriteAllText($ReportPath, $json, [System.Text.Encoding]::UTF8)
+
+        Write-Log "JSON-звiт створено: $ReportPath" -Level "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "Помилка створення JSON-звiту: $($_.Exception.Message)" -Level "ERROR"
+        return $false
+    }
+}
+# <<< JSON REPORT PATCH: END
 function Main {
     Set-ArchivWindowTitle -Stage "Запуск скрипта"
     # Ініціалізація
     $scriptStartTime = Get-Date
     $now = Get-Date -Format "yyyyMMdd_HHmm"
     $global:logFile = "$logPath\ARCHIV_VETOFFICE_$now.log"
+    $global:jsonReportFile = "$logPath\ARCHIV_VETOFFICE_$now.json"
     
     Write-Log "==="
     Write-Log "=== ПОЧАТОК РОБОТИ СКРИПТА ARCHIV_VETOFFICE v.$ScriptVersion ==="
@@ -2016,6 +2174,7 @@ function Main {
     Write-Log "Час початку: $($scriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Кореневий каталог: $rootPath" -NoTimestamp
     Write-Log "Режим логування: $LogLevel" -NoTimestamp
+    Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "DRY-RUN: $(if ($global:DryRun) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Параметри для 7-Zip: $safeArchiveParams" -NoTimestamp
     Write-Log "Копiювання в мережу: $(if ($enableNetworkCopy) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
@@ -2422,6 +2581,14 @@ function Main {
     }
     
     Write-Log "" -NoTimestamp
+    New-ArchivJsonReport `
+        -StartedAt $scriptStartTime `
+        -FinishedAt $scriptEndTime `
+        -Results $results `
+        -Archives $archives `
+        -ReportPath $global:jsonReportFile | Out-Null
+
+    Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Лог-файл: $logFile" -NoTimestamp
     Write-Log "==="
 
