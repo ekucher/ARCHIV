@@ -1933,11 +1933,16 @@ function Main {
     Write-Log "Файл конфiгурацiї: $configPath" -Level "INFO"
     Write-Log "==="
     
+    $safeArchiveParams = $archiveParams
+    if (-not [string]::IsNullOrWhiteSpace($safeArchiveParams)) {
+        $safeArchiveParams = [regex]::Replace($safeArchiveParams, '-p("[^"]*"|\S+)', '-p*****')
+    }
     Write-Log "=== ОПЦIЇ СКРИПТА ==="
     Write-Log "Версiя та дата скрипта: $ScriptVersion вiд $ScriptDate" -NoTimestamp
     Write-Log "Час початку: $($scriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Кореневий каталог: $rootPath" -NoTimestamp
     Write-Log "Режим логування: $LogLevel" -NoTimestamp
+    Write-Log "Параметри для7-Zip: $safeArchiveParams" -NoTimestamp
     Write-Log "Копiювання в мережу: $(if ($enableNetworkCopy) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Синхронiзацiя BAZA в мережу: $(if ($excludeComponents.BAZA_Network) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
     Write-Log "Синхронiзацiя BAZA локальна: $(if ($excludeComponents.BAZA) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
