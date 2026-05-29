@@ -1386,7 +1386,9 @@ function Test-FreeSpaceForArchive {
 
         [double]$ReserveMultiplier = 1.2,
         [double]$MinFreeSpaceGB = 20,
-        [string]$ArchiveType = "ARCHIVE"
+        [string]$ArchiveType = "ARCHIVE",
+        [string]$ArchivePasswordSwitch = "",
+        [int]$TimeoutSeconds = 600
     )
 
     Write-Log "Перевiрка вiльного мiсця перед архiвацiєю..." -Level "DEBUG" -LogOnly
@@ -1431,6 +1433,98 @@ function Test-FreeSpaceForArchive {
     return $true
 }
 
+function Test-ArchiveIntegrity {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ArchivePath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ArcPath,
+
+        [string]$ArchiveType = "ARCHIVE",
+        [string]$ArchivePasswordSwitch = "",
+        [int]$TimeoutSeconds = 600
+    )
+
+    if ($global:DryRun) {
+        Write-Log "DRY-RUN: перевiрка архiву пропущена: $(Split-Path $ArchivePath -Leaf)" -Level "WARNING"
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $ArchivePath)) {
+        Write-Log "Архiв для перевiрки не знайдено: $ArchivePath" -Level "ERROR"
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $ArcPath)) {
+        Write-Log "7-Zip не знайдено для перевiрки архiву: $ArcPath" -Level "ERROR"
+        return $false
+    }
+
+    Write-Log "Перевiрка архiву 7-Zip: $(Split-Path $ArchivePath -Leaf)" -Level "INFO"
+
+    try {
+        Set-ArchivWindowTitle -Stage "Тест архiву $ArchiveType"
+
+        $testParams = "t -y -bb0"
+
+        if (-not [string]::IsNullOrWhiteSpace($ArchivePasswordSwitch)) {
+            $testParams = "$testParams $ArchivePasswordSwitch"
+        }
+
+        $arguments = "$testParams `"$ArchivePath`""
+
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $ArcPath
+        $processInfo.Arguments = $arguments
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+        $processInfo.RedirectStandardInput = $true
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        $process.Start() | Out-Null
+        Add-ProcessToArchivKillOnCloseJob -Process $process
+
+        try {
+            # Якщо 7-Zip спробує щось запитати інтерактивно, відправляємо порожній ввід і закриваємо stdin.
+            $process.StandardInput.WriteLine("")
+            $process.StandardInput.Close()
+        } catch {
+        }
+
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch {}
+            Write-Log "Перевiрка архiву перевищила timeout $TimeoutSeconds сек: $ArchivePath" -Level "ERROR"
+            return $false
+        }
+
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $errorOutput = $process.StandardError.ReadToEnd()
+
+        if ($process.ExitCode -eq 0) {
+            Write-Log "Перевiрка архiву пройдена: $(Split-Path $ArchivePath -Leaf)" -Level "SUCCESS"
+            return $true
+        }
+
+        Write-Log "Помилка перевiрки архiву 7-Zip (код: $($process.ExitCode)): $ArchivePath" -Level "ERROR"
+
+        if (-not [string]::IsNullOrWhiteSpace($errorOutput)) {
+            Write-Log "7-Zip test stderr: $errorOutput" -Level "ERROR"
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($standardOutput)) {
+            Write-Log "7-Zip test stdout: $standardOutput" -Level "ERROR" -LogOnly
+        }
+
+        return $false
+    } catch {
+        Write-Log "Помилка перевiрки архiву: $($_.Exception.Message)" -Level "ERROR"
+        return $false
+    }
+}
 function New-Archive {
     param(
         [string]$SourcePath,
@@ -1440,7 +1534,9 @@ function New-Archive {
         [string]$ArcParams,
         [double]$ReserveMultiplier = 1.2,
         [double]$MinFreeSpaceGB = 20,
-        [string]$ArchiveType = "ARCHIVE"
+        [string]$ArchiveType = "ARCHIVE",
+        [string]$ArchivePasswordSwitch = "",
+        [int]$TimeoutSeconds = 600
     )
      
     $archiveDir = Split-Path $ArchivePath -Parent
@@ -1518,6 +1614,34 @@ $archivePassword = Get-ArchivArchivePassword
         if ($process.ExitCode -eq 0) {
             Set-ArchivArchiveElapsedTitle -ArchiveType $ArchiveType -Elapsed ((Get-Date) - $archiveStartTime) -SourceSizeText $archiveSourceSizeText
             Write-Log "Архiв створено: $fullArchivePath" -Level "SUCCESS"
+
+            $archiveIntegrityEnabled = $false
+            $integrityVariable = Get-Variable -Name "enableArchiveIntegrityTest" -Scope Global -ErrorAction SilentlyContinue
+            if ($null -eq $integrityVariable) {
+                $integrityVariable = Get-Variable -Name "enableArchiveIntegrityTest" -Scope Script -ErrorAction SilentlyContinue
+            }
+            if ($null -eq $integrityVariable) {
+                $integrityVariable = Get-Variable -Name "enableArchiveIntegrityTest" -ErrorAction SilentlyContinue
+            }
+            if ($null -ne $integrityVariable) {
+                $archiveIntegrityEnabled = [bool]$integrityVariable.Value
+            }
+
+            if ($archiveIntegrityEnabled) {
+                $archivePasswordSwitch = ""
+                $passwordSwitchMatch = [regex]::Match($effectiveArcParams, '(^|\s)(-p("[^"]*"|\S+))')
+                if ($passwordSwitchMatch.Success) {
+                    $archivePasswordSwitch = $passwordSwitchMatch.Groups[2].Value
+                }
+
+                if (-not (Test-ArchiveIntegrity -ArchivePath $fullArchivePath -ArcPath $ArcPath -ArchiveType $ArchiveType -ArchivePasswordSwitch $archivePasswordSwitch)) {
+                    Write-Log "Архiв створено, але перевiрку цiлiсностi не пройдено: $fullArchivePath" -Level "ERROR"
+                    return $false
+                }
+            } else {
+                Write-Log "Перевiрку цiлiсностi архiву вимкнено в налаштуваннях" -Level "WARNING" -LogOnly
+            }
+
             return $true
         } else {
             Write-Log "Помилка архiвацiї (код: $($process.ExitCode)): $fullArchivePath" -Level "ERROR"
@@ -2353,6 +2477,7 @@ function New-ArchivJsonReport {
             report_file              = $ReportPath
             archive_prefix           = $archivePrefix
             archive_params           = if ($safeArchiveParams) { $safeArchiveParams } else { $archiveParams }
+            archive_integrity_test_enabled = [bool]$enableArchiveIntegrityTest
             free_space_reserve_gb    = $freeSpaceReserveGB
             archive_space_multiplier = $archiveSpaceMultiplier
             archives                 = $archiveReports
@@ -2413,6 +2538,7 @@ function Main {
     Write-Log "Веб-панель: заплановано на майбутнє" -NoTimestamp
     Write-Log "DRY-RUN: $(if ($global:DryRun) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Параметри для 7-Zip: $safeArchiveParams" -NoTimestamp
+    Write-Log "Перевiрка архiвiв 7-Zip: $(if ($enableArchiveIntegrityTest) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Копiювання в мережу: $(if ($enableNetworkCopy) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Синхронiзацiя BAZA в мережу: $(if ($excludeComponents.BAZA_Network) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
     Write-Log "Синхронiзацiя BAZA локальна: $(if ($excludeComponents.BAZA) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
