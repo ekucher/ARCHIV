@@ -1701,25 +1701,10 @@ function Process-NetworkCopy {
 }
 
 # =============================================
-# >>> WINDOW TITLE STAGES PATCH: BEGIN
-function Set-ArchivWindowTitle {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Stage
-    )
-
-    try {
-        $Host.UI.RawUI.WindowTitle = "ARCHIV VETOFFICE v$ScriptVersion | $Stage"
-    } catch {
-        # Window title is best-effort only.
-    }
-}
-# <<< WINDOW TITLE STAGES PATCH: END
 # ОСНОВНА ЛОГІКА
 # =============================================
 
 function Main {
-    Set-ArchivWindowTitle -Stage "Запуск скрипта"
     # Ініціалізація
     $scriptStartTime = Get-Date
     $now = Get-Date -Format "yyyyMMdd_HHmm"
@@ -1743,7 +1728,6 @@ function Main {
     # ОЧИЩЕННЯ СТАРИХ ЛОГІВ - виконується в кінці
     
     # Перевірка шляхів
-    Set-ArchivWindowTitle -Stage "Перевiрка шляхiв"
     Write-Log "=== ПЕРЕВIРКА НЕОБХIДНИХ ШЛЯХIВ ==="
 
     $requiredPaths = @(
@@ -1807,7 +1791,6 @@ function Main {
     Write-Log "Параметри перевiрки мiсця: резерв=$freeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
         
     foreach ($archive in $archives) {
-        Set-ArchivWindowTitle -Stage "Архiвацiя $($archive.Type)"
         Write-Log "--- АРХIВАЦIЯ $($archive.Type) ---"
 
         $success = New-Archive `
@@ -1820,7 +1803,6 @@ function Main {
             -MinFreeSpaceGB $freeSpaceReserveGB
         
         if ($success) {
-            Set-ArchivWindowTitle -Stage "SHA512 $($archive.Type)"
             Write-Log "--- СТВОРЕННЯ ХЕШУ $($archive.Type) ---"
             $archivePath = Join-Path $archive.Destination $archive.Name
             $hashPath = "$archivePath.sha512"
@@ -1843,7 +1825,6 @@ function Main {
     Write-Log "==="
     
     # Завантаження на SFTP
-    Set-ArchivWindowTitle -Stage "SFTP"
     if ($enableSFTPUpload) {
         Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ==="
         Write-Log "--- ПЕРЕВІРКА КОНФІГУРАЦІЇ SFTP ---"
@@ -1900,7 +1881,6 @@ function Main {
     }
     
     # Завантаження в мережеву папку (Samba)
-    Set-ArchivWindowTitle -Stage "Копiювання в мережу"
     if ($enableNetworkCopy) {
         Write-Log "=== КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ ==="
         Write-Log "--- ПIДКЛЮЧЕННЯ МЕРЕЖЕВОГО ДИСКА ---"
@@ -1959,7 +1939,6 @@ function Main {
         Write-Log "===" -LogOnly
     }
     
-    Set-ArchivWindowTitle -Stage "Синхронiзацiя BAZA"
     Write-Log "=== СИНХРОНІЗАЦІЯ ФАЙЛІВ BAZA ==="
     
     # Синхронізація BAZA (тільки якщо не вимкнена)
@@ -1994,7 +1973,6 @@ function Main {
     Write-Log "==="
     
     # Очищення старих архівів
-    Set-ArchivWindowTitle -Stage "Очищення старих архiвiв"
     if ($enableArchiveDeletion) {
         Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ==="
         foreach ($archiveType in $archiveDirs.Keys) {
@@ -2017,7 +1995,6 @@ function Main {
         Write-Log "===" -LogOnly
     }
     
-    Set-ArchivWindowTitle -Stage "Очищення старих логiв"
     Write-Log "=== ОЧИЩЕННЯ СТАРИХ ЛОГIВ ==="
     Remove-OldFiles -Path $logPath -Filter "ARCHIV_VETOFFICE_*.log" -KeepCount $logRetentionDays -FileType "логiв" | Out-Null
     Write-Log "==="
@@ -2026,7 +2003,6 @@ function Main {
     $scriptEndTime = Get-Date
     $duration = $scriptEndTime - $scriptStartTime
     
-    Set-ArchivWindowTitle -Stage "Завершено"
     Write-Log "=== ЗАВЕРШЕННЯ РОБОТИ СКРИПТА ==="
     Write-Log "Час початку: $($scriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Час завершення: $($scriptEndTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
@@ -2041,7 +2017,6 @@ function Main {
     # Отримуємо статистику SFTP
     $uploadSuccess = 0
     $uploadTotal = 0
-    Set-ArchivWindowTitle -Stage "SFTP"
     if ($enableSFTPUpload) {
         if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
             $uploadTotal += 2
@@ -2056,7 +2031,6 @@ function Main {
     # Отримуємо статистику мережевого копіювання
     $copySuccess = 0
     $copyTotal = 0
-    Set-ArchivWindowTitle -Stage "Копiювання в мережу"
     if ($enableNetworkCopy) {
         if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
             $copyTotal += 2
@@ -2071,14 +2045,12 @@ function Main {
     Write-Log "Створено архiвiв: $(if ($successArchives -eq $totalArchives -and $totalArchives -gt 0) {'успішно'} else {'$successArchives з $totalArchives'})" -NoTimestamp
     Write-Log "Створено хешу для архівів: $(if ($successHashes -eq $totalArchives -and $totalArchives -gt 0) {'успішно'} else {'$successHashes з $totalArchives'})" -NoTimestamp
     
-    Set-ArchivWindowTitle -Stage "SFTP"
     if ($enableSFTPUpload) {
         Write-Log "Завантаження на SFTP: $(if ($uploadSuccess -eq $uploadTotal -and $uploadTotal -gt 0) {'успiшно'} elseif ($uploadTotal -eq 0) {'немає файлів'} else {'$uploadSuccess з $uploadTotal'})" -NoTimestamp
     } else {
         Write-Log "Завантаження на SFTP: вимкнено" -NoTimestamp
     }
     
-    Set-ArchivWindowTitle -Stage "Копiювання в мережу"
     if ($enableNetworkCopy) {
         Write-Log "Завантаження в мережеву папку: $(if ($copySuccess -eq $copyTotal -and $copyTotal -gt 0) {'успiшно'} elseif ($copyTotal -eq 0) {'немає файлів'} else {'$copySuccess з $copyTotal'})" -NoTimestamp
     } else {

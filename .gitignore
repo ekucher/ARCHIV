@@ -12,6 +12,7 @@
 /STATE/
 /TEMP/
 /Trace/
+/VETOFFICE/
 
 # Local configs / secrets
 /BRAVO.config.ps1
@@ -62,6 +63,10 @@ Desktop.ini
 # Local legacy launcher scripts
 /ARCHIV_BRAVO.cmd
 /ARCHIV_BRAVO.ps1
+/ARCHIV_VETOFFICE.CMD
+/ARCHIV_VETOFFICE.config.ps1
+/Update-VetOffice.ps1
+/Update-VetOffice — копия.ps1
 
 # Keep source credentials module in Git
 !/src/30-Credentials.ps1
