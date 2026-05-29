@@ -1138,6 +1138,197 @@ function Sync-Folders {
 }
 
 # =============================================
+# >>> CREDENTIAL MANAGER SECRETS PATCH: BEGIN
+function Initialize-ArchivCredentialReader {
+    if ("ArchivCredentialManager.NativeMethods" -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace ArchivCredentialManager {
+    public static class NativeMethods {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct CREDENTIAL {
+            public UInt32 Flags;
+            public UInt32 Type;
+            public string TargetName;
+            public string Comment;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+            public UInt32 CredentialBlobSize;
+            public IntPtr CredentialBlob;
+            public UInt32 Persist;
+            public UInt32 AttributeCount;
+            public IntPtr Attributes;
+            public string TargetAlias;
+            public string UserName;
+        }
+
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool CredRead(string target, UInt32 type, UInt32 reservedFlag, out IntPtr credentialPtr);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        public static extern void CredFree(IntPtr buffer);
+    }
+}
+"@
+}
+
+function Get-ArchivWindowsCredential {
+    param([string]$Target)
+
+    if ([string]::IsNullOrWhiteSpace($Target)) {
+        return $null
+    }
+
+    Initialize-ArchivCredentialReader
+
+    foreach ($type in @(1, 2)) {
+        $credentialPtr = [IntPtr]::Zero
+
+        try {
+            $found = [ArchivCredentialManager.NativeMethods]::CredRead($Target, [uint32]$type, 0, [ref]$credentialPtr)
+
+            if (-not $found -or $credentialPtr -eq [IntPtr]::Zero) {
+                continue
+            }
+
+            $credential = [Runtime.InteropServices.Marshal]::PtrToStructure(
+                $credentialPtr,
+                [type][ArchivCredentialManager.NativeMethods+CREDENTIAL]
+            )
+
+            $password = ""
+            if ($credential.CredentialBlob -ne [IntPtr]::Zero -and $credential.CredentialBlobSize -gt 0) {
+                $password = [Runtime.InteropServices.Marshal]::PtrToStringUni(
+                    $credential.CredentialBlob,
+                    [int]($credential.CredentialBlobSize / 2)
+                )
+            }
+
+            return [PSCustomObject]@{
+                Target   = $Target
+                Username = $credential.UserName
+                Password = $password
+                Type     = $type
+            }
+        }
+        finally {
+            if ($credentialPtr -ne [IntPtr]::Zero) {
+                [ArchivCredentialManager.NativeMethods]::CredFree($credentialPtr)
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-ArchivCredentialPassword {
+    param(
+        [string]$Target,
+        [string]$FallbackPassword = ""
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        $credential = Get-ArchivWindowsCredential -Target $Target
+
+        if ($credential -and -not [string]::IsNullOrWhiteSpace($credential.Password)) {
+            Write-Log "Секрет отримано з Windows Credential Manager (Target: $Target)" -Level "DEBUG" -LogOnly
+            return $credential.Password
+        }
+
+        Write-Log "Секрет не знайдено в Windows Credential Manager (Target: $Target)" -Level "WARNING" -LogOnly
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($FallbackPassword)) {
+        Write-Log "Використовується fallback-секрет з конфігурації" -Level "WARNING" -LogOnly
+        return $FallbackPassword
+    }
+
+    return $null
+}
+
+function Get-ArchivConfigValue {
+    param(
+        [string]$Name,
+        $DefaultValue = $null
+    )
+
+    $variable = Get-Variable -Name $Name -ErrorAction SilentlyContinue
+    if ($null -ne $variable) {
+        return $variable.Value
+    }
+
+    return $DefaultValue
+}
+
+function Get-ArchivArchivePassword {
+    $enabled = Get-ArchivConfigValue -Name "enableArchivePassword" -DefaultValue $false
+
+    if (-not $enabled) {
+        return $null
+    }
+
+    $target = Get-ArchivConfigValue -Name "archivePasswordCredentialTarget" -DefaultValue "ARCHIV_VETOFFICE_ARCHIVE_PASSWORD"
+    return Get-ArchivCredentialPassword -Target $target
+}
+
+function Get-ArchivSftpPassword {
+    $target = Get-ArchivConfigValue -Name "sftpPasswordCredentialTarget" -DefaultValue "ARCHIV_VETOFFICE_SFTP_PASSWORD"
+    $fallback = Get-ArchivConfigValue -Name "Password" -DefaultValue ""
+    return Get-ArchivCredentialPassword -Target $target -FallbackPassword $fallback
+}
+
+function Get-ArchivNetworkPassword {
+    $target = $null
+    $fallback = ""
+
+    if ($networkCopyConfig) {
+        if ($networkCopyConfig.ContainsKey("PasswordCredentialTarget")) {
+            $target = $networkCopyConfig.PasswordCredentialTarget
+        }
+
+        if ($networkCopyConfig.ContainsKey("Password")) {
+            $fallback = $networkCopyConfig.Password
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($target)) {
+        $target = "ARCHIV_VETOFFICE_NETWORK_PASSWORD"
+    }
+
+    return Get-ArchivCredentialPassword -Target $target -FallbackPassword $fallback
+}
+
+function Resolve-ArchivSftpUrl {
+    param([string]$RepositorySFTPUrl)
+
+    $loginValue = Get-ArchivConfigValue -Name "Login" -DefaultValue ""
+    $passwordValue = Get-ArchivSftpPassword
+
+    if ([string]::IsNullOrWhiteSpace($loginValue)) {
+        Write-Log "SFTP логiн не встановлено" -Level "ERROR"
+        return $null
+    }
+
+    if ([string]::IsNullOrWhiteSpace($passwordValue)) {
+        Write-Log "SFTP пароль не знайдено в Windows Credential Manager" -Level "ERROR"
+        return $null
+    }
+
+    # Якщо URL вже містить user/password або user@host, залишаємо як є.
+    if ($RepositorySFTPUrl -match '^[a-zA-Z]+://[^/]*@') {
+        return $RepositorySFTPUrl
+    }
+
+    $encodedLogin = [Uri]::EscapeDataString($loginValue)
+    $encodedPassword = [Uri]::EscapeDataString($passwordValue)
+
+    return ($RepositorySFTPUrl -replace '^(sftp://)', ('${1}' + "$encodedLogin`:$encodedPassword@"))
+}
+# <<< CREDENTIAL MANAGER SECRETS PATCH: END
 # ФУНКЦІЇ АРХІВАЦІЇ
 # =============================================
 
@@ -1276,7 +1467,14 @@ function New-Archive {
     $fullArchivePath = Join-Path $ArchivePath $ArchiveName
     
     try {
-        $arguments = "$ArcParams `"$fullArchivePath`" `"$SourcePath`""
+        $effectiveArcParams = $ArcParams
+        $archivePassword = Get-ArchivArchivePassword
+
+        if (-not [string]::IsNullOrWhiteSpace($archivePassword)) {
+            $effectiveArcParams = "$effectiveArcParams -p`"$archivePassword`""
+        }
+
+        $arguments = "$effectiveArcParams `"$fullArchivePath`" `"$SourcePath`""
         
         $processInfo = New-Object System.Diagnostics.ProcessStartInfo
         $processInfo.FileName = $ArcPath
@@ -1508,7 +1706,12 @@ function Connect-NetworkDrive {
     $driveLetter = "Z:"
     $networkPath = $networkCopyConfig.NetworkPath.TrimEnd('\')
     $username = $networkCopyConfig.Username
-    $password = $networkCopyConfig.Password
+    $password = Get-ArchivNetworkPassword
+
+    if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrWhiteSpace($password)) {
+        Write-Log "Логiн або пароль мережевої папки не встановлено / не знайдено в Windows Credential Manager" -Level "ERROR"
+        return $false
+    }
     
     # Перевіряємо, чи не підключений вже диск
     try {

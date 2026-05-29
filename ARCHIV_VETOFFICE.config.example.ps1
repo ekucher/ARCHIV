@@ -1,4 +1,4 @@
-﻿﻿##########
+﻿###########
 # BravoSoft / VetOffice
 # ARCHIV_VETOFFICE.config.example.ps1
 #
@@ -68,7 +68,13 @@ $archivePrefix = "vetcontrol_dev_pnmgu_v2508"
 # Рекомендовано залишити розширення .mdz у назві архіву, а формат архіву явно задати через -tzip або інший потрібний формат.
 #
 # Приклад ZIP-сумісного архіву:
-$archiveParams = "a -tzip -mx=5 -mmt=on"
+$archiveParams = "a -mmt -mx9 -r -y -ssw -scrcSHA256 -bb0 -aoa"
+
+# Пароль архiву з Windows Credential Manager.
+# Зберегти:
+#   cmdkey /generic:ARCHIV_VETOFFICE_ARCHIVE_PASSWORD /user:archive /pass:ВашПароль
+$enableArchivePassword = $true
+$archivePasswordCredentialTarget = "ARCHIV_VETOFFICE_ARCHIVE_PASSWORD"
 
 # Кількість останніх архівів / hash-файлів, які залишати при очищенні
 $archiveVersions = 7
@@ -129,7 +135,11 @@ $enableSFTPUpload = $false
 # Облікові дані SFTP.
 # Не зберігайте реальні паролі у публічному репозиторії.
 $Login = "sftp_user"
-$Password = "CHANGE_ME"
+# Пароль SFTP з Windows Credential Manager.
+# Зберегти:
+#   cmdkey /generic:ARCHIV_VETOFFICE_SFTP_PASSWORD /user:sftp /pass:ВашПароль
+$sftpPasswordCredentialTarget = "ARCHIV_VETOFFICE_SFTP_PASSWORD"
+$Password = ""
 
 # URL у форматі WinSCP, наприклад:
 #   sftp://backup.example.com/
@@ -155,6 +165,10 @@ $enableNetworkCopy = $false
 $networkCopyConfig = @{
     NetworkPath = "\\SERVER\Backup\VetOffice"
     Username    = ""
+    # Пароль мережевої папки з Windows Credential Manager.
+    # Зберегти:
+    #   cmdkey /generic:ARCHIV_VETOFFICE_NETWORK_PASSWORD /user:network /pass:ВашПароль
+    PasswordCredentialTarget = "ARCHIV_VETOFFICE_NETWORK_PASSWORD"
     Password    = ""
     MaxRetries  = 3
     RetryDelay  = 10
