@@ -1995,6 +1995,240 @@ function Set-ArchivWindowTitle {
 # ОСНОВНА ЛОГІКА
 # =============================================
 
+# >>> HISTORY / STATS / HEALTH PATCH: BEGIN
+function Show-ArchivRunStatistics {
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Results,
+
+        [Parameter(Mandatory=$true)]
+        [array]$Archives
+    )
+
+    try {
+        Write-Log "=== СТАТИСТИКА АРХIВАЦIЇ ==="
+
+        foreach ($archive in $Archives) {
+            $type = [string]$archive.Type
+            $archivePath = Join-Path $archive.Destination $archive.Name
+            $hashPath = "$archivePath.sha512"
+
+            $sourceSizeBytes = Get-PathSizeBytes -Path $archive.Source
+            $archiveSizeBytes = Get-ArchivFileSizeSafe -Path $archivePath
+            $compressionRatio = Get-ArchivCompressionRatio -SourceSizeBytes $sourceSizeBytes -ArchiveSizeBytes $archiveSizeBytes
+
+            Write-Log "${type}:" -NoTimestamp
+            Write-Log "  Джерело: $(if ($null -ne $sourceSizeBytes) { Format-FileSize -Bytes $sourceSizeBytes } else { 'невідомо' })" -NoTimestamp
+
+            if ($global:DryRun) {
+                Write-Log "  Архiв: DRY-RUN, фактично не створювався" -NoTimestamp
+                Write-Log "  Стиснення: DRY-RUN" -NoTimestamp
+            } else {
+                Write-Log "  Архiв: $(if ($null -ne $archiveSizeBytes) { Format-FileSize -Bytes $archiveSizeBytes } else { 'не створено' })" -NoTimestamp
+                Write-Log "  Стиснення: $(if ($null -ne $compressionRatio) { "$compressionRatio%" } else { 'невідомо' })" -NoTimestamp
+            }
+
+            Write-Log "  SHA512: $(if (Test-Path -LiteralPath $hashPath) { 'створено' } elseif ($global:DryRun) { 'DRY-RUN' } else { 'не створено' })" -NoTimestamp
+        }
+
+        Write-Log "==="
+    } catch {
+        Write-Log "Помилка формування статистики архiвацiї: $($_.Exception.Message)" -Level "WARNING"
+    }
+}
+
+function Update-ArchivHistory {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ReportPath,
+
+        [string]$HistoryPath = ""
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($HistoryPath)) {
+            $HistoryPath = Join-Path $logPath "history.json"
+        }
+
+        if (-not (Test-Path -LiteralPath $ReportPath)) {
+            Write-Log "JSON-звiт не знайдено для оновлення history.json: $ReportPath" -Level "WARNING"
+            return $false
+        }
+
+        $report = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json
+
+        $history = @()
+        if (Test-Path -LiteralPath $HistoryPath) {
+            try {
+                $existing = Get-Content -LiteralPath $HistoryPath -Raw | ConvertFrom-Json
+                if ($existing -is [array]) {
+                    $history = @($existing)
+                } elseif ($null -ne $existing) {
+                    $history = @($existing)
+                }
+            } catch {
+                Write-Log "history.json пошкоджений або має некоректний формат. Буде створено новий файл." -Level "WARNING"
+                $history = @()
+            }
+        }
+
+        $archivesCount = 0
+        $archivesSuccess = 0
+        $totalSourceBytes = [int64]0
+        $totalArchiveBytes = [int64]0
+
+        foreach ($archive in @($report.archives)) {
+            $archivesCount++
+
+            if ($archive.archive_success -and $archive.hash_success) {
+                $archivesSuccess++
+            }
+
+            if ($null -ne $archive.source_size_bytes) {
+                $totalSourceBytes += [int64]$archive.source_size_bytes
+            }
+
+            if ($null -ne $archive.archive_size_bytes) {
+                $totalArchiveBytes += [int64]$archive.archive_size_bytes
+            }
+        }
+
+        $overallSuccess = ($archivesCount -gt 0 -and $archivesSuccess -eq $archivesCount)
+
+        if ($report.dry_run) {
+            $overallSuccess = $true
+        }
+
+        $entry = [PSCustomObject]@{
+            started_at               = $report.started_at
+            finished_at              = $report.finished_at
+            duration_seconds         = $report.duration_seconds
+            duration_text            = $report.duration_text
+            dry_run                  = [bool]$report.dry_run
+            success                  = [bool]$overallSuccess
+            archives_count           = $archivesCount
+            archives_success         = $archivesSuccess
+            total_source_size_bytes  = $totalSourceBytes
+            total_source_size_text   = Format-FileSize -Bytes $totalSourceBytes
+            total_archive_size_bytes = if ($totalArchiveBytes -gt 0) { $totalArchiveBytes } else { $null }
+            total_archive_size_text  = if ($totalArchiveBytes -gt 0) { Format-FileSize -Bytes $totalArchiveBytes } else { $null }
+            report_file              = $ReportPath
+            log_file                 = $report.log_file
+        }
+
+        $history = @($history + $entry) |
+            Sort-Object started_at -Descending |
+            Select-Object -First 100
+
+        $historyJson = $history | ConvertTo-Json -Depth 8
+        [System.IO.File]::WriteAllText($HistoryPath, $historyJson, [System.Text.Encoding]::UTF8)
+
+        Write-Log "Iсторiю запускiв оновлено: $HistoryPath" -Level "SUCCESS"
+        return $true
+    } catch {
+        Write-Log "Помилка оновлення history.json: $($_.Exception.Message)" -Level "ERROR"
+        return $false
+    }
+}
+
+function ConvertTo-ArchivBool {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return $false
+    }
+
+    if ($Value -is [array]) {
+        if ($Value.Count -eq 0) {
+            return $false
+        }
+        $Value = $Value[0]
+    }
+
+    if ($Value -is [bool]) {
+        return $Value
+    }
+
+    $text = ([string]$Value).Trim()
+    return ($text -match '^(true|1|yes|y|так)$')
+}
+function Test-ArchivBackupHealth {
+    param(
+        [string]$HistoryPath = "",
+        [int]$WarningDays = 3,
+        [int]$CriticalDays = 7
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($HistoryPath)) {
+            $HistoryPath = Join-Path $logPath "history.json"
+        }
+
+        Write-Log "=== СТАН РЕЗЕРВНИХ КОПIЙ ==="
+
+        if (-not (Test-Path -LiteralPath $HistoryPath)) {
+            Write-Log "history.json ще не створено. Стан резервних копiй буде доступний пiсля першого запуску." -Level "WARNING"
+            Write-Log "==="
+            return
+        }
+
+        $historyRaw = Get-Content -LiteralPath $HistoryPath -Raw
+        if ([string]::IsNullOrWhiteSpace($historyRaw)) {
+            Write-Log "history.json порожнiй" -Level "WARNING"
+            Write-Log "==="
+            return
+        }
+
+        $historyParsed = $historyRaw | ConvertFrom-Json
+        $history = @()
+        foreach ($item in @($historyParsed)) {
+            if ($item -is [array]) { $history += @($item) } else { $history += $item }
+        }
+
+        $successfulRealRuns = @($history | Where-Object {
+            ((ConvertTo-ArchivBool $_.success) -eq $true) -and ((ConvertTo-ArchivBool $_.dry_run) -ne $true)
+        } | Sort-Object started_at -Descending)
+
+        $lastAnyRun = $history | Sort-Object started_at -Descending | Select-Object -First 1
+
+        if ($null -ne $lastAnyRun) {
+            $lastAnyRunIsDryRun = ConvertTo-ArchivBool $lastAnyRun.dry_run
+            Write-Log "Останнiй запуск: $($lastAnyRun.started_at)$(if ($lastAnyRunIsDryRun) { ' (DRY-RUN)' } else { '' })" -NoTimestamp
+        }
+
+        if ($successfulRealRuns.Count -eq 0) {
+            Write-Log "У history.json немає успiшних реальних запускiв архiвацiї" -Level "WARNING"
+            Write-Log "==="
+            return
+        }
+
+        $lastSuccess = $successfulRealRuns | Select-Object -First 1
+        $lastSuccessDate = [datetime]::Parse($lastSuccess.started_at)
+        $age = (Get-Date) - $lastSuccessDate
+        $ageDays = [math]::Round($age.TotalDays, 2)
+
+        Write-Log "Останнiй успiшний архiв: $($lastSuccess.started_at), $ageDays дн. тому" -NoTimestamp
+        Write-Log "Архiвiв у запуску: $($lastSuccess.archives_success) з $($lastSuccess.archives_count)" -NoTimestamp
+        Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -NoTimestamp
+
+        if ($lastSuccess.total_archive_size_text) {
+            Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -NoTimestamp
+        }
+
+        if ($age.TotalDays -ge $CriticalDays) {
+            Write-Log "КРИТИЧНО: останнiй успiшний архiв старший за $CriticalDays дн." -Level "ERROR"
+        } elseif ($age.TotalDays -ge $WarningDays) {
+            Write-Log "УВАГА: останнiй успiшний архiв старший за $WarningDays дн." -Level "WARNING"
+        } else {
+            Write-Log "Стан резервних копiй: OK" -Level "SUCCESS"
+        }
+
+        Write-Log "==="
+    } catch {
+        Write-Log "Помилка перевiрки стану резервних копiй: $($_.Exception.Message)" -Level "WARNING"
+    }
+}
+# <<< HISTORY / STATS / HEALTH PATCH: END
 # >>> JSON REPORT PATCH: BEGIN
 function Get-ArchivFileSizeSafe {
     param([string]$Path)
@@ -2175,6 +2409,8 @@ function Main {
     Write-Log "Кореневий каталог: $rootPath" -NoTimestamp
     Write-Log "Режим логування: $LogLevel" -NoTimestamp
     Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
+    Write-Log "Iсторiя запускiв: $(Join-Path $logPath 'history.json')" -NoTimestamp
+    Write-Log "Веб-панель: заплановано на майбутнє" -NoTimestamp
     Write-Log "DRY-RUN: $(if ($global:DryRun) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Параметри для 7-Zip: $safeArchiveParams" -NoTimestamp
     Write-Log "Копiювання в мережу: $(if ($enableNetworkCopy) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
@@ -2588,7 +2824,10 @@ function Main {
         -Archives $archives `
         -ReportPath $global:jsonReportFile | Out-Null
 
-    Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
+    
+    Update-ArchivHistory -ReportPath $global:jsonReportFile | Out-Null
+    Test-ArchivBackupHealth
+Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Лог-файл: $logFile" -NoTimestamp
     Write-Log "==="
 
