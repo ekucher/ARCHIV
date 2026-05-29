@@ -1385,7 +1385,8 @@ function Test-FreeSpaceForArchive {
         [string]$ArchivePath,
 
         [double]$ReserveMultiplier = 1.2,
-        [double]$MinFreeSpaceGB = 20
+        [double]$MinFreeSpaceGB = 20,
+        [string]$ArchiveType = "ARCHIVE"
     )
 
     Write-Log "Перевiрка вiльного мiсця перед архiвацiєю..." -Level "DEBUG" -LogOnly
@@ -1438,7 +1439,8 @@ function New-Archive {
         [string]$ArcPath,
         [string]$ArcParams,
         [double]$ReserveMultiplier = 1.2,
-        [double]$MinFreeSpaceGB = 20
+        [double]$MinFreeSpaceGB = 20,
+        [string]$ArchiveType = "ARCHIVE"
     )
      
     $archiveDir = Split-Path $ArchivePath -Parent
@@ -1466,13 +1468,14 @@ function New-Archive {
         Write-Log "DRY-RUN: архiв не створюється: $ArchiveName" -Level "WARNING"
         return $true
     }
+    Set-ArchivArchiveElapsedTitle -ArchiveType $ArchiveType -Elapsed ([TimeSpan]::Zero) -SourceSizeText $archiveSourceSizeText
     Write-Log "Створення архiву: $ArchiveName"
     
     $fullArchivePath = Join-Path $ArchivePath $ArchiveName
     
     try {
         $effectiveArcParams = $ArcParams
-        $archivePassword = Get-ArchivArchivePassword
+$archivePassword = Get-ArchivArchivePassword
 
         if (-not [string]::IsNullOrWhiteSpace($archivePassword)) {
             $effectiveArcParams = "$effectiveArcParams -p`"$archivePassword`""
@@ -1492,11 +1495,28 @@ function New-Archive {
         $process.StartInfo = $processInfo
         $process.Start() | Out-Null
         Add-ProcessToArchivKillOnCloseJob -Process $process
+
+        $archiveSourceSizeBytes = Get-PathSizeBytes -Path $SourcePath
+        if ($null -ne $archiveSourceSizeBytes -and $archiveSourceSizeBytes -gt 0) {
+            $archiveSourceSizeText = Format-FileSize -Bytes $archiveSourceSizeBytes
+        } else {
+            $archiveSourceSizeText = ""
+        }
+        $archiveStartTime = Get-Date
+        Set-ArchivArchiveElapsedTitle -ArchiveType $ArchiveType -Elapsed ([TimeSpan]::Zero) -SourceSizeText $archiveSourceSizeText
+
+        while (-not $process.HasExited) {
+            $elapsed = (Get-Date) - $archiveStartTime
+            Set-ArchivArchiveElapsedTitle -ArchiveType $ArchiveType -Elapsed $elapsed -SourceSizeText $archiveSourceSizeText
+            Start-Sleep -Seconds 1
+        }
+
         $standardOutput = $process.StandardOutput.ReadToEnd()
         $errorOutput = $process.StandardError.ReadToEnd()
         $process.WaitForExit()
         
         if ($process.ExitCode -eq 0) {
+            Set-ArchivArchiveElapsedTitle -ArchiveType $ArchiveType -Elapsed ((Get-Date) - $archiveStartTime) -SourceSizeText $archiveSourceSizeText
             Write-Log "Архiв створено: $fullArchivePath" -Level "SUCCESS"
             return $true
         } else {
@@ -1913,6 +1933,52 @@ function Process-NetworkCopy {
 
 # =============================================
 # >>> WINDOW TITLE STAGES PATCH: BEGIN
+# >>> ARCHIVE WINDOW TITLE PROGRESS PATCH: BEGIN
+# >>> ARCHIVE ELAPSED WINDOW TITLE PATCH: BEGIN
+function Set-ArchivArchiveElapsedTitle {
+    param(
+        [string]$ArchiveType,
+        [TimeSpan]$Elapsed,
+        [string]$SourceSizeText = ""
+    )
+
+    try {
+        if ([string]::IsNullOrWhiteSpace($ArchiveType)) {
+            $ArchiveType = "ARCHIVE"
+        }
+
+                $elapsedText = $Elapsed.ToString('hh\:mm\:ss')
+
+        if ([string]::IsNullOrWhiteSpace($SourceSizeText)) {
+            $Host.UI.RawUI.WindowTitle = "ARCHIV | $ArchiveType | $elapsedText"
+        } else {
+            $Host.UI.RawUI.WindowTitle = "ARCHIV | $ArchiveType | $elapsedText | $SourceSizeText"
+        }
+    } catch {
+        # Window title is best-effort only.
+    }
+}
+# <<< ARCHIVE ELAPSED WINDOW TITLE PATCH: END
+function Set-ArchivArchiveProgressTitle {
+    param(
+        [string]$ArchiveName,
+        [string]$ArchiveType,
+        [int]$Percent
+    )
+
+    try {
+        $safePercent = [Math]::Max(0, [Math]::Min(100, $Percent))
+
+        if ([string]::IsNullOrWhiteSpace($ArchiveType)) {
+            $ArchiveType = "ARCHIVE"
+        }
+
+        $Host.UI.RawUI.WindowTitle = "ARCHIV | $ArchiveType | $safePercent%"
+    } catch {
+        # Window title is best-effort only.
+    }
+}
+# <<< ARCHIVE WINDOW TITLE PROGRESS PATCH: END
 function Set-ArchivWindowTitle {
     param(
         [Parameter(Mandatory=$true)]
@@ -1920,7 +1986,7 @@ function Set-ArchivWindowTitle {
     )
 
     try {
-        $Host.UI.RawUI.WindowTitle = "ARCHIV VETOFFICE v$ScriptVersion | $Stage"
+        $Host.UI.RawUI.WindowTitle = "ARCHIV | $Stage"
     } catch {
         # Window title is best-effort only.
     }
@@ -2034,7 +2100,8 @@ function Main {
             -ArcPath $arcPath `
             -ArcParams $archiveParams `
             -ReserveMultiplier $archiveSpaceMultiplier `
-            -MinFreeSpaceGB $freeSpaceReserveGB
+            -MinFreeSpaceGB $freeSpaceReserveGB `
+            -ArchiveType $archive.Type
         
         if ($success) {
             Set-ArchivWindowTitle -Stage "SHA512 $($archive.Type)"
