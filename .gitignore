@@ -12,6 +12,7 @@
 /STATE/
 /TEMP/
 /Trace/
+/Br-a-vo.web/
 
 # Local configs / secrets
 /BRAVO.config.ps1
@@ -31,10 +32,8 @@
 *.pfx
 *.cer
 
-# Keep source modules in Git
-!/Modules/
-!/Modules/**
-!/Modules/BRAVO.Credentials.ps1
+# Keep source credentials module in Git
+!/src/30-Credentials.ps1
 
 # Patch / backup files
 /Apply-BRAVO-*.ps1
@@ -50,25 +49,16 @@
 /*.mdz
 /*.sha512
 
+# Generated monolith
+/BRAVO_MAINTENANCE.ps1
+/BRAVO_MAINTENANCE.ps1.sha512
+
 # Windows / IDE
 Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
-# Local legacy launcher scripts
-/ARCHIV_BRAVO.cmd
-/ARCHIV_BRAVO.ps1
 
 # Local legacy launcher scripts
 /ARCHIV_BRAVO.cmd
 /ARCHIV_BRAVO.ps1
-
-# Keep source credentials module in Git
-!/src/30-Credentials.ps1
-
-# Generated monolith
-/BRAVO_MAINTENANCE.ps1
-/BRAVO_MAINTENANCE.ps1.sha512
-
-# Runtime archived Apache/Br-a-vo.web logs
-/Br-a-vo.web/
