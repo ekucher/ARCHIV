@@ -458,6 +458,9 @@ public static class ArchivJobKillOnClose {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
         public long PerProcessUserTimeLimit;
@@ -545,14 +548,72 @@ function Add-ProcessToArchivKillOnCloseJob {
     }
 
     try {
-        [void][ArchivJobKillOnClose]::AssignProcessToJobObject($script:ArchivJobHandle, $Process.Handle)
+    $assigned = [ArchivJobKillOnClose]::AssignProcessToJobObject($script:ArchivJobHandle, $Process.Handle)
+
+    if ($assigned) {
+        Write-Log "[JOB] PID=$($Process.Id) assigned to kill-on-close job" -Level "DEBUG" -LogOnly
+    } else {
+        $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        Write-Host "[JOB] FAILED PID=$($Process.Id), Win32Error=$err" -ForegroundColor Yellow
     }
-    catch {
-        # Do not stop backup if Windows refuses job assignment.
-    }
+}
+catch {
+    Write-Host "[JOB] EXCEPTION PID=$($Process.Id): $($_.Exception.Message)" -ForegroundColor Yellow
+}
 }
 
 Initialize-ArchivKillOnCloseJob
+# >>> ARCHIV WATCHDOG PATCH: BEGIN
+function Start-ArchivWatchdog {
+    param(
+        [Parameter(Mandatory=$true)]
+        [int]$ParentPid
+    )
+
+    try {
+        $watchdogScript = Join-Path $env:TEMP ("ARCHIV_VETOFFICE_watchdog_{0}.ps1" -f $ParentPid)
+
+        $scriptText = @"
+`$parentPid = $ParentPid
+`$processNames = @('7za', '7z', 'WinSCP', 'robocopy')
+
+while (`$true) {
+    Start-Sleep -Seconds 2
+
+    `$parent = Get-Process -Id `$parentPid -ErrorAction SilentlyContinue
+
+    if (`$null -eq `$parent) {
+        foreach (`$name in `$processNames) {
+            Get-Process -Name `$name -ErrorAction SilentlyContinue | ForEach-Object {
+                try {
+                    taskkill /PID `$_.Id /T /F | Out-Null
+                } catch {
+                }
+            }
+        }
+
+        Remove-Item -LiteralPath `$PSCommandPath -Force -ErrorAction SilentlyContinue
+        break
+    }
+}
+"@
+
+        [System.IO.File]::WriteAllText($watchdogScript, $scriptText, [System.Text.Encoding]::UTF8)
+
+        Start-Process powershell.exe `
+            -WindowStyle Hidden `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$watchdogScript`"" `
+            -ErrorAction SilentlyContinue | Out-Null
+
+        Write-Host "[WATCHDOG] Started for PowerShell PID=$ParentPid" -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Host "[WATCHDOG] Failed to start: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+Start-ArchivWatchdog -ParentPid $PID
+# <<< ARCHIV WATCHDOG PATCH: END
 # <<< PROCESS KILL-ON-CLOSE PATCH: END
 function Write-Log {
     param(
@@ -1158,9 +1219,7 @@ function New-Archive {
         [double]$ReserveMultiplier = 1.2,
         [double]$MinFreeSpaceGB = 20
     )
-    
-    Write-Log "Створення архiву: $ArchiveName"
-    
+     
     $archiveDir = Split-Path $ArchivePath -Parent
     if (-not (Test-Path $archiveDir)) {
         try {
@@ -1181,6 +1240,8 @@ function New-Archive {
         Write-Log "Архiвацiю скасовано через недостатнiй резерв вiльного мiсця: $ArchiveName" -Level "ERROR"
         return $false
     }
+
+    Write-Log "Створення архiву: $ArchiveName"
     
     $fullArchivePath = Join-Path $ArchivePath $ArchiveName
     
@@ -1587,6 +1648,7 @@ function Process-NetworkCopy {
             
             # Копіюємо хеш-файл
             Write-Log "--- КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ ХЕШУ АРХІВУ $archiveType ---"
+Write-Log "Параметри перевiрки мiсця: резерв=$archiveMinFreeSpaceGB GB; множник=$archiveReserveMultiplier" -Level "INFO"
             $hashCopy = Copy-ToNetworkDrive -SourcePath $Results[$archiveType].HashPath -DestinationFolder $targetFolder
             if ($hashCopy) { $copySuccess++ }
             
@@ -1700,7 +1762,6 @@ function Main {
     
     foreach ($archive in $archives) {
         Write-Log "--- АРХIВАЦIЯ $($archive.Type) ---"
-        Write-Log "Параметри перевiрки мiсця з конфiгу: резерв=$freeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
 
         $success = New-Archive `
             -SourcePath $archive.Source `
