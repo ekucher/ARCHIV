@@ -1167,7 +1167,7 @@ function Test-FreeSpaceForArchive {
         [double]$MinFreeSpaceGB = 20
     )
 
-    Write-Log "Перевiрка вiльного мiсця перед архiвацiєю..." -Level "INFO"
+    Write-Log "Перевiрка вiльного мiсця перед архiвацiєю..." -Level "DEBUG" -LogOnly
 
     $sourceSizeBytes = Get-PathSizeBytes -Path $SourcePath
     if ($null -eq $sourceSizeBytes) {
@@ -1205,7 +1205,7 @@ function Test-FreeSpaceForArchive {
         return $false
     }
 
-    Write-Log "Перевiрка вiльного мiсця пройдена" -Level "SUCCESS"
+    Write-Log "Перевiрка вiльного мiсця пройдена" -Level "DEBUG" -LogOnly
     return $true
 }
 
@@ -1759,8 +1759,7 @@ function Main {
     
     Write-Log "=== АРХIВАЦIЯ ТА СТВОРЕННЯ ХЕШУ ==="
     Write-Log "Параметри перевiрки мiсця: резерв=$freeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
-    Write-Log "Вiльно на диску архiву: $(Format-FileSize -Bytes $freeBytes)" -Level "INFO"
-    
+        
     foreach ($archive in $archives) {
         Write-Log "--- АРХIВАЦIЯ $($archive.Type) ---"
 
