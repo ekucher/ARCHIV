@@ -18,10 +18,14 @@ function Restore-FromArchive {
     }
 
     $extractParams = @($SevenZipExtractArgs) + @(
-        "-o$Destination",
-        "-p$ArchivePassword",
-        $ArchivePath
+        "-o$Destination"
     )
+
+    if ($ArchivePasswordEnabled -eq "on" -and -not [string]::IsNullOrWhiteSpace($ArchivePassword)) {
+        $extractParams += "-p$ArchivePassword"
+    }
+
+    $extractParams += $ArchivePath
     
     $exitCode = Invoke-CommandWithLog -Command $ARC_PATH -Arguments $extractParams -Description "Відновлення моделі з архіву"
     
@@ -446,14 +450,15 @@ function Remove-OldRestoreArchives {
     }
 }
 
-function Verify-Backup {
+function New-BravoArchiveSha512 {
     param(
+        [Parameter(Mandatory = $true)]
         [string]$ArchivePath
     )
-    
-    Write-Log "Перевірка контрольних сум архіву: $([System.IO.Path]::GetFileName($ArchivePath))" -Level "DEBUG"
-    
-    if (-not (Test-Path $ArchivePath)) {
+
+    Write-Log "Створення SHA512 для архіву: $([System.IO.Path]::GetFileName($ArchivePath))" -Level "DEBUG"
+
+    if (-not (Test-Path -LiteralPath $ArchivePath)) {
         $errorMsg = "Архів не знайдено: $ArchivePath"
         Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
         $global:criticalErrorOccurred = $true
@@ -462,22 +467,78 @@ function Verify-Backup {
 
     $shaFile = "$ArchivePath.sha512"
     $fileName = [System.IO.Path]::GetFileName($ArchivePath)
-    $valid = $true
 
     try {
-        # Генерація контрольної суми
-        $hash = (Get-FileHash -Path $ArchivePath -Algorithm SHA512).Hash.ToUpper()
+        $hash = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA512).Hash.ToUpperInvariant()
         "$hash *$fileName" | Out-File -FilePath $shaFile -Encoding ASCII
-        
-        # Повний шлях до архіву без зайвого розширення
-        Write-Log "Контрольна сума архіву збережена для -> $ArchivePath" -Level "DEBUG"
+
+        Write-Log "SHA512 контрольна сума збережена для -> $ArchivePath" -Level "DEBUG"
+        return $true
     }
     catch {
-        Write-Log "ПОМИЛКА: Помилка перевірки архіву $fileName - $($_.Exception.Message)" -Level "ERROR"
-        $valid = $false
+        Write-Log "ПОМИЛКА: Не вдалося створити SHA512 для архіву $fileName - $($_.Exception.Message)" -Level "ERROR"
+        $global:criticalErrorOccurred = $true
+        return $false
     }
-
-    return $valid
 }
 
+function Test-BravoArchiveSha512 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArchivePath
+    )
 
+    Write-Log "Перевірка SHA512 архіву: $([System.IO.Path]::GetFileName($ArchivePath))" -Level "DEBUG"
+
+    if (-not (Test-Path -LiteralPath $ArchivePath)) {
+        $errorMsg = "Архів не знайдено: $ArchivePath"
+        Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+        $global:criticalErrorOccurred = $true
+        return $false
+    }
+
+    $shaFile = "$ArchivePath.sha512"
+
+    if (-not (Test-Path -LiteralPath $shaFile)) {
+        $errorMsg = "SHA512 файл не знайдено: $shaFile"
+        Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
+        $global:criticalErrorOccurred = $true
+        return $false
+    }
+
+    try {
+        $expectedLine = Get-Content -LiteralPath $shaFile -TotalCount 1 -ErrorAction Stop
+
+        if ([string]::IsNullOrWhiteSpace($expectedLine)) {
+            throw "SHA512 файл порожній"
+        }
+
+        $expectedHash = (($expectedLine -split '\s+')[0]).Trim().ToUpperInvariant()
+        $actualHash = (Get-FileHash -LiteralPath $ArchivePath -Algorithm SHA512).Hash.ToUpperInvariant()
+
+        if ($actualHash -ne $expectedHash) {
+            Write-Log "ПОМИЛКА: SHA512 не збігається для архіву $ArchivePath" -Level "ERROR"
+            Write-Log "Очікувано: $expectedHash" -Level "DEBUG"
+            Write-Log "Фактично:  $actualHash" -Level "DEBUG"
+            $global:criticalErrorOccurred = $true
+            return $false
+        }
+
+        Write-Log "SHA512 перевірка успішна для -> $ArchivePath" -Level "DEBUG"
+        return $true
+    }
+    catch {
+        Write-Log "ПОМИЛКА: Не вдалося перевірити SHA512 для архіву $ArchivePath - $($_.Exception.Message)" -Level "ERROR"
+        $global:criticalErrorOccurred = $true
+        return $false
+    }
+}
+
+function Verify-Backup {
+    param(
+        [string]$ArchivePath
+    )
+
+    Write-Log "Verify-Backup deprecated: використовуйте New-BravoArchiveSha512 для створення checksum або Test-BravoArchiveSha512 для перевірки." -Level "WARNING"
+    return New-BravoArchiveSha512 -ArchivePath $ArchivePath
+}

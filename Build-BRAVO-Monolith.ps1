@@ -6,24 +6,23 @@
 .DESCRIPTION
     Keep development modular in src\ and deploy one generated monolith to servers.
 
-    Default layout:
-        src\
-          00-Header.ps1
-          05-Params.ps1
-          10-Config.ps1
-          20-Logging.ps1
-          30-Credentials.ps1
-          40-Slack.ps1
-          50-ProgressState.ps1
-          60-Scheduler.ps1
-          70-Archive.ps1
-          80-HealthCheck.ps1
-          90-Maintenance.ps1
-          99-Main.ps1
-          BRAVO.build.json
+Default layout:
+    src\
+        05-Params.ps1
+        10-Config.ps1
+        20-Logging.ps1
+        30-Credentials.ps1
+        40-Slack.ps1
+        50-ProgressState.ps1
+        60-Files.ps1
+        70-Archive.ps1
+        80-HealthCheck.ps1
+        90-System.ps1
+        99-Main.ps1
+        BRAVO.build.json
 
-        dist\
-          BRAVO_MAINTENANCE.ps1
+    dist\
+        BRAVO_MAINTENANCE.ps1
 
 .EXAMPLE
     .\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
