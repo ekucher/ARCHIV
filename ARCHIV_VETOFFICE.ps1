@@ -605,10 +605,10 @@ while (`$true) {
             -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$watchdogScript`"" `
             -ErrorAction SilentlyContinue | Out-Null
 
-        Write-Host "[WATCHDOG] Started for PowerShell PID=$ParentPid" -ForegroundColor DarkGray
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log "[WATCHDOG] Started for PowerShell PID=$ParentPid" -Level "DEBUG" -LogOnly }
     }
     catch {
-        Write-Host "[WATCHDOG] Failed to start: $($_.Exception.Message)" -ForegroundColor Yellow
+        if (Get-Command Write-Log -ErrorAction SilentlyContinue) { Write-Log "[WATCHDOG] Failed to start: $($_.Exception.Message)" -Level "WARNING" -LogOnly }
     }
 }
 
@@ -1462,6 +1462,10 @@ function New-Archive {
         return $false
     }
 
+    if ($global:DryRun) {
+        Write-Log "DRY-RUN: архiв не створюється: $ArchiveName" -Level "WARNING"
+        return $true
+    }
     Write-Log "Створення архiву: $ArchiveName"
     
     $fullArchivePath = Join-Path $ArchivePath $ArchiveName
@@ -1517,6 +1521,10 @@ function New-SHA512Hash {
         [string]$HashFilePath
     )
     
+    if ($global:DryRun) {
+        Write-Log "DRY-RUN: SHA512 хеш не створюється: $(Split-Path $FilePath -Leaf)" -Level "WARNING"
+        return $true
+    }
     Write-Log "Створення SHA512 хешу: $(Split-Path $FilePath -Leaf)"
     
     if (-not (Test-Path $FilePath)) {
@@ -1942,7 +1950,8 @@ function Main {
     Write-Log "Час початку: $($scriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Кореневий каталог: $rootPath" -NoTimestamp
     Write-Log "Режим логування: $LogLevel" -NoTimestamp
-    Write-Log "Параметри для7-Zip: $safeArchiveParams" -NoTimestamp
+    Write-Log "DRY-RUN: $(if ($global:DryRun) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
+    Write-Log "Параметри для 7-Zip: $safeArchiveParams" -NoTimestamp
     Write-Log "Копiювання в мережу: $(if ($enableNetworkCopy) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     Write-Log "Синхронiзацiя BAZA в мережу: $(if ($excludeComponents.BAZA_Network) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
     Write-Log "Синхронiзацiя BAZA локальна: $(if ($excludeComponents.BAZA) {'ВИМКНЕНО'} else {'УВIМКНЕНО'})" -NoTimestamp
@@ -2050,9 +2059,14 @@ function Main {
     
     Write-Log "==="
     
+    if ($global:DryRun -and $enableSFTPUpload) {
+        Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ==="
+        Write-Log "DRY-RUN: завантаження на SFTP пропущено" -Level "WARNING"
+        Write-Log "==="
+    }
     # Завантаження на SFTP
     Set-ArchivWindowTitle -Stage "SFTP"
-    if ($enableSFTPUpload) {
+    if ($enableSFTPUpload -and -not $global:DryRun) {
         Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ==="
         Write-Log "--- ПЕРЕВІРКА КОНФІГУРАЦІЇ SFTP ---"
         
@@ -2107,9 +2121,14 @@ function Main {
         Write-Log "===" -LogOnly
     }
     
+    if ($global:DryRun -and $enableNetworkCopy) {
+        Write-Log "=== КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ ==="
+        Write-Log "DRY-RUN: копiювання в мережеву папку пропущено" -Level "WARNING"
+        Write-Log "==="
+    }
     # Завантаження в мережеву папку (Samba)
     Set-ArchivWindowTitle -Stage "Копiювання в мережу"
-    if ($enableNetworkCopy) {
+    if ($enableNetworkCopy -and -not $global:DryRun) {
         Write-Log "=== КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ ==="
         Write-Log "--- ПIДКЛЮЧЕННЯ МЕРЕЖЕВОГО ДИСКА ---"
         
@@ -2171,7 +2190,10 @@ function Main {
     Write-Log "=== СИНХРОНІЗАЦІЯ ФАЙЛІВ BAZA ==="
     
     # Синхронізація BAZA (тільки якщо не вимкнена)
-    if (-not $excludeComponents.BAZA) {
+    if ($global:DryRun -and -not $excludeComponents.BAZA) {
+        Write-Log "DRY-RUN: локальна синхронiзацiя BAZA пропущена" -Level "WARNING"
+        $syncLocalSuccess = $true
+    } elseif (-not $excludeComponents.BAZA) {
         # ЛОКАЛЬНА синхронізація BAZA
         $syncLocalSuccess = Sync-Folders -SourcePath $bazaPaths.Source -DestinationPath $bazaPaths.Destination_Local -SyncType "LOCAL"
 
@@ -2185,7 +2207,10 @@ function Main {
     }
     
     # МЕРЕЖЕВА синхронізація BAZA
-    if (-not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
+    if ($global:DryRun -and -not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
+        Write-Log "DRY-RUN: мережева синхронiзацiя BAZA пропущена" -Level "WARNING"
+        $syncNetworkSuccess = $true
+    } elseif (-not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
         $syncNetworkSuccess = Sync-Folders -SourcePath $bazaPaths.Source -DestinationPath $bazaPaths.Destination_Network -SyncType "NETWORK"
 
         if ($syncNetworkSuccess) {
@@ -2203,7 +2228,11 @@ function Main {
     
     # Очищення старих архівів
     Set-ArchivWindowTitle -Stage "Очищення старих архiвiв"
-    if ($enableArchiveDeletion) {
+    if ($global:DryRun -and $enableArchiveDeletion) {
+        Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ==="
+        Write-Log "DRY-RUN: очищення старих архiвiв пропущено" -Level "WARNING"
+        Write-Log "==="
+    } elseif ($enableArchiveDeletion) {
         Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ==="
         foreach ($archiveType in $archiveDirs.Keys) {
             # Пропускаємо вимкнені компоненти
@@ -2226,9 +2255,15 @@ function Main {
     }
     
     Set-ArchivWindowTitle -Stage "Очищення старих логiв"
-    Write-Log "=== ОЧИЩЕННЯ СТАРИХ ЛОГIВ ==="
-    Remove-OldFiles -Path $logPath -Filter "ARCHIV_VETOFFICE_*.log" -KeepCount $logRetentionDays -FileType "логiв" | Out-Null
-    Write-Log "==="
+    if ($global:DryRun) {
+        Write-Log "=== ОЧИЩЕННЯ СТАРИХ ЛОГIВ ==="
+        Write-Log "DRY-RUN: очищення старих логiв пропущено" -Level "WARNING"
+        Write-Log "==="
+    } else {
+        Write-Log "=== ОЧИЩЕННЯ СТАРИХ ЛОГIВ ==="
+        Remove-OldFiles -Path $logPath -Filter "ARCHIV_VETOFFICE_*.log" -KeepCount $logRetentionDays -FileType "логiв" | Out-Null
+        Write-Log "==="
+    }
     
     # Завершення
     $scriptEndTime = Get-Date
@@ -2250,7 +2285,7 @@ function Main {
     $uploadSuccess = 0
     $uploadTotal = 0
     Set-ArchivWindowTitle -Stage "SFTP"
-    if ($enableSFTPUpload) {
+    if ($enableSFTPUpload -and -not $global:DryRun) {
         if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
             $uploadTotal += 2
             $uploadSuccess += 2
@@ -2265,7 +2300,7 @@ function Main {
     $copySuccess = 0
     $copyTotal = 0
     Set-ArchivWindowTitle -Stage "Копiювання в мережу"
-    if ($enableNetworkCopy) {
+    if ($enableNetworkCopy -and -not $global:DryRun) {
         if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
             $copyTotal += 2
             $copySuccess += 2
@@ -2276,30 +2311,44 @@ function Main {
         }
     }
     
-    Write-Log "Створено архiвiв: $(if ($successArchives -eq $totalArchives -and $totalArchives -gt 0) {'успішно'} else {'$successArchives з $totalArchives'})" -NoTimestamp
-    Write-Log "Створено хешу для архівів: $(if ($successHashes -eq $totalArchives -and $totalArchives -gt 0) {'успішно'} else {'$successHashes з $totalArchives'})" -NoTimestamp
+    if ($global:DryRun) {
+        Write-Log "Створено архiвiв: DRY-RUN, фактично не створювались" -NoTimestamp
+    } else {
+        Write-Log "Створено архiвiв: $(if ($successArchives -eq $totalArchives -and $totalArchives -gt 0) {'успішно'} else {'$successArchives з $totalArchives'})" -NoTimestamp
+    }
+    if ($global:DryRun) {
+        Write-Log "Створено хешу для архівів: DRY-RUN, фактично не створювались" -NoTimestamp
+    } else {
+        Write-Log "Створено хешу для архівів: $(if ($successHashes -eq $totalArchives -and $totalArchives -gt 0) {'успішно'} else {'$successHashes з $totalArchives'})" -NoTimestamp
+    }
     
     Set-ArchivWindowTitle -Stage "SFTP"
-    if ($enableSFTPUpload) {
+    if ($enableSFTPUpload -and -not $global:DryRun) {
         Write-Log "Завантаження на SFTP: $(if ($uploadSuccess -eq $uploadTotal -and $uploadTotal -gt 0) {'успiшно'} elseif ($uploadTotal -eq 0) {'немає файлів'} else {'$uploadSuccess з $uploadTotal'})" -NoTimestamp
     } else {
         Write-Log "Завантаження на SFTP: вимкнено" -NoTimestamp
     }
     
     Set-ArchivWindowTitle -Stage "Копiювання в мережу"
-    if ($enableNetworkCopy) {
+    if ($enableNetworkCopy -and -not $global:DryRun) {
         Write-Log "Завантаження в мережеву папку: $(if ($copySuccess -eq $copyTotal -and $copyTotal -gt 0) {'успiшно'} elseif ($copyTotal -eq 0) {'немає файлів'} else {'$copySuccess з $copyTotal'})" -NoTimestamp
     } else {
         Write-Log "Завантаження в мережеву папку: вимкнено" -NoTimestamp
     }
     
-    if (-not $excludeComponents.BAZA) {
+    if ($global:DryRun -and -not $excludeComponents.BAZA) {
+        Write-Log "DRY-RUN: локальна синхронiзацiя BAZA пропущена" -Level "WARNING"
+        $syncLocalSuccess = $true
+    } elseif (-not $excludeComponents.BAZA) {
         Write-Log "Локальна сихронізація BAZA: $(if ($syncLocalSuccess) {'успiшна'} else {'з помилками'})" -NoTimestamp
     } else {
         Write-Log "Локальна сихронізація BAZA: вимкнено" -NoTimestamp
     }
     
-    if (-not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
+    if ($global:DryRun -and -not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
+        Write-Log "DRY-RUN: мережева синхронiзацiя BAZA пропущена" -Level "WARNING"
+        $syncNetworkSuccess = $true
+    } elseif (-not $excludeComponents.BAZA_Network -and $enableNetworkCopy) {
         Write-Log "Мережева сихронізація BAZA: $(if ($syncNetworkSuccess) {'успiшна'} else {'з помилками'})" -NoTimestamp
     } else {
         Write-Log "Мережева сихронізація BAZA: вимкнено" -NoTimestamp
@@ -2328,18 +2377,30 @@ function Show-Help {
     Write-Host "  -Schedule                - Додати в Планувальник завдань" -ForegroundColor White
     Write-Host "  -ShowTasks               - Показати завдання в Планувальнику" -ForegroundColor White
     Write-Host "  -RemoveTask              - Видалити завдання з Планувальника" -ForegroundColor White
+    Write-Host "  -DryRun                  - Тестовий запуск без створення архiвiв/хешiв/копiювання" -ForegroundColor White
     Write-Host "  -Help, -?, /?            - Показати цю довiдку" -ForegroundColor White
     
     Write-Host "`nПриклади:" -ForegroundColor Cyan
     Write-Host "  .\ARCHIV_VETOFFICE.ps1                    - Запуск архiвацiї" -ForegroundColor Gray
     Write-Host "  .\ARCHIV_VETOFFICE.ps1 -Schedule         - Додати в Планувальник" -ForegroundColor Gray
     Write-Host "  .\ARCHIV_VETOFFICE.ps1 -ShowTasks        - Перелiк завдань" -ForegroundColor Gray
-    Write-Host "  .\ARCHIV_VETOFFICE.ps1 -RemoveTask       - Видалити завдання" -ForegroundColor Gray
+    Write-Host "  .\ARCHIV_VETOFFICE.ps1 -DryRun           - Тест без створення архiвiв
+  .\ARCHIV_VETOFFICE.ps1 -RemoveTask       - Видалити завдання" -ForegroundColor Gray
     
     Write-Host "`nФайл конфiгурацiї: $configPath" -ForegroundColor Gray
     Write-Host "Версiя скрипта: $ScriptVersion вiд $ScriptDate`n" -ForegroundColor Gray
 }
 
+# >>> DRY-RUN MODE PATCH: BEGIN
+$global:DryRun = $false
+
+if ($args -contains "-DryRun" -or $args -contains "--dry-run" -or $args -contains "/dry-run") {
+    $global:DryRun = $true
+    $args = @($args | Where-Object {
+        $_ -notin @("-DryRun", "--dry-run", "/dry-run")
+    })
+}
+# <<< DRY-RUN MODE PATCH: END
 # Обробка параметрів командного рядка
 if ($args.Count -gt 0) {
     $param = $args[0].ToLower()
