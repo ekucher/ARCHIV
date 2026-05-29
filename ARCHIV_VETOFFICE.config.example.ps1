@@ -1,0 +1,180 @@
+﻿﻿##########
+# BravoSoft / VetOffice
+# ARCHIV_VETOFFICE.config.example.ps1
+#
+# Приклад конфігурації для ARCHIV_VETOFFICE.ps1
+#
+# Як використовувати:
+#   1. Скопіюйте цей файл у ARCHIV_VETOFFICE.config.ps1
+#   2. Відредагуйте шляхи, назву архіву та параметри
+#   3. Не комітьте реальний ARCHIV_VETOFFICE.config.ps1, якщо там є паролі
+##########
+
+# =============================================
+# ОСНОВНІ ШЛЯХИ
+# =============================================
+
+# Коренева папка VetOffice
+$rootPath = "E:\VetOffice"
+
+# Папка зі службовими утилітами
+# Очікуються:
+#   Tools\7za.exe
+#   Tools\WinSCP.com
+#   Tools\WinSCP.exe
+$toolsPath = Join-Path $PSScriptRoot "Tools"
+
+# Папка логів
+$logPath = Join-Path $PSScriptRoot "LOGS"
+
+# Коренева папка архівів
+$archivPath = $PSScriptRoot
+
+# =============================================
+# ДЖЕРЕЛА ДАНИХ
+# =============================================
+
+$sourcePaths = @{
+    # Основна папка VetOffice / Model
+    Model = Join-Path $rootPath "VETOFFICE"
+
+    # Папка BLOG, якщо використовується
+    Blog  = Join-Path $rootPath "BLOG"
+}
+
+# =============================================
+# ПАПКИ ПРИЗНАЧЕННЯ ДЛЯ АРХІВІВ
+# =============================================
+
+$archiveDirs = @{
+    # Архіви основної бази / Model / VetOffice
+    Model = Join-Path $archivPath "VETOFFICE"
+
+    # Архіви BLOG
+    Blog  = Join-Path $archivPath "BLOG"
+}
+
+# =============================================
+# НАЗВИ ТА ПАРАМЕТРИ АРХІВАЦІЇ
+# =============================================
+
+# Префікс імені архівів.
+# Фінальне ім'я буде приблизно:
+#   vetcontrol_dev_pnmgu_v2508_20260529_2318.mdz
+#   vetcontrol_dev_pnmgu_v2508_blog_20260529_2318.mdz
+$archivePrefix = "vetcontrol_dev_pnmgu_v2508"
+
+# Параметри 7-Zip.
+# Рекомендовано залишити розширення .mdz у назві архіву, а формат архіву явно задати через -tzip або інший потрібний формат.
+#
+# Приклад ZIP-сумісного архіву:
+$archiveParams = "a -tzip -mx=5 -mmt=on"
+
+# Кількість останніх архівів / hash-файлів, які залишати при очищенні
+$archiveVersions = 7
+
+# Кількість останніх логів, які залишати
+$logRetentionDays = 31
+
+# Увімкнути видалення старих архівів
+$enableArchiveDeletion = $true
+
+# =============================================
+# ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ
+# =============================================
+
+# Мінімальний резерв вільного місця на диску архіву, GB
+$freeSpaceReserveGB = 5
+
+# Множник до розміру джерела.
+# Наприклад, якщо джерело 10 GB і множник 1.2, потрібно мінімум 12 GB.
+# Фактично використовується max($freeSpaceReserveGB, sourceSize * multiplier).
+$archiveSpaceMultiplier = 1.2
+
+# =============================================
+# КОМПОНЕНТИ, ЯКІ МОЖНА ВИМКНУТИ
+# =============================================
+
+$excludeComponents = @{
+    # Основна архівація VetOffice / Model
+    VETOFFICE    = $false
+
+    # Архівація BLOG
+    Blog         = $false
+
+    # Локальна синхронізація BAZA
+    BAZA         = $true
+
+    # Мережева синхронізація BAZA
+    BAZA_Network = $true
+}
+
+# =============================================
+# BAZA / СИНХРОНІЗАЦІЯ
+# =============================================
+
+$bazaPaths = @{
+    Source              = Join-Path $rootPath "BAZA"
+    Destination_Local   = Join-Path $archivPath "BAZA"
+    Destination_Network = "\\SERVER\Backup\VetOffice\BAZA"
+}
+
+# =============================================
+# SFTP
+# =============================================
+
+# Увімкнути завантаження архівів і hash-файлів на SFTP
+$enableSFTPUpload = $false
+
+# Облікові дані SFTP.
+# Не зберігайте реальні паролі у публічному репозиторії.
+$Login = "sftp_user"
+$Password = "CHANGE_ME"
+
+# URL у форматі WinSCP, наприклад:
+#   sftp://backup.example.com/
+$sftpUrl = "sftp://backup.example.com/"
+
+# HostKey WinSCP.
+# Отримайте актуальне значення при першому підключенні або з налаштувань сервера.
+$sftpHostKey = "ssh-ed25519 255 SHA256:CHANGE_ME"
+
+# Віддалені каталоги SFTP
+$sftpDirectories = @{
+    Model = "/backup/VetOffice/Model"
+    BLOG  = "/backup/VetOffice/BLOG"
+}
+
+# =============================================
+# КОПІЮВАННЯ В МЕРЕЖЕВУ ПАПКУ
+# =============================================
+
+# Увімкнути копіювання архівів у мережеву папку
+$enableNetworkCopy = $false
+
+$networkCopyConfig = @{
+    NetworkPath = "\\SERVER\Backup\VetOffice"
+    Username    = ""
+    Password    = ""
+    MaxRetries  = 3
+    RetryDelay  = 10
+}
+
+# =============================================
+# ЛОГУВАННЯ ТА ВИВІД
+# =============================================
+
+# Рівень логування:
+#   DEBUG   - максимально детально
+#   INFO    - стандартний режим
+#   WARNING - тільки попередження і помилки
+#   ERROR   - тільки помилки
+$global:LogLevel = "INFO"
+
+# Показувати додаткову інформацію про систему
+$showSystemInfo = $false
+$showHardwareInfo = $false
+$showPerformanceInfo = $false
+
+# Режим сумісності, якщо потрібен для старих середовищ
+$compatibilityMode = $false
