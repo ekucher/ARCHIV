@@ -1,7 +1,7 @@
 ﻿##########
 # BravoSoft
 # Author: Evgeniy Kucher
-# Version: 2.1, 2025-12-11
+# Version: 2.5, 2026-05-30
 # Скрипт для архівації та резервного копіювання даних VETOFFICE системи
 # Модифікована версія з покращеним логуванням
 # Конфігурація винесена в окремий файл
@@ -36,8 +36,8 @@ if (!$currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adminis
 # =============================================
 
 # Змінні версії
-$ScriptVersion = "2.1"
-$ScriptDate = "2025-12-11"
+$ScriptVersion = "2.5"
+$ScriptDate = "2026-05-30"
 
 # Шлях до файлу конфігурації
 $configPath = Join-Path $PSScriptRoot "ARCHIV_VETOFFICE.config.ps1"
@@ -3518,6 +3518,7 @@ function Main {
             $hashPath = "$archivePath.sha512"
             $hashSuccess = New-SHA512Hash -FilePath $archivePath -HashFilePath $hashPath
             $hashVerifySuccess = $false
+
             $archiveSizePolicySuccess = $false
             $restoreTestSuccess = $false
             if ($hashSuccess) {
