@@ -897,6 +897,182 @@ function Remove-OldFiles {
     }
 }
 
+
+function Invoke-ArchivArchiveRetention {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ArchiveType,
+
+        [string]$DisplayName = "",
+
+        [int]$KeepCount = 31,
+
+        [int]$KeepDays = 0
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) {
+        switch ($ArchiveType) {
+            "Model" { $DisplayName = "VETOFFICE" }
+            "Blog"  { $DisplayName = "BLOG" }
+            default { $DisplayName = $ArchiveType.ToUpperInvariant() }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        Write-Log "Каталог архiвiв не знайдено: $Path" -Level "WARNING"
+        return $false
+    }
+
+    if ($KeepCount -lt 1) {
+        Write-Log "Некоректне значення KeepCount для ${ArchiveType}: $KeepCount. Використано 1." -Level "WARNING"
+        $KeepCount = 1
+    }
+
+    try {
+        $archives = @(Get-ChildItem -LiteralPath $Path -Filter "*.mdz" -File -ErrorAction Stop |
+            Sort-Object LastWriteTime -Descending)
+
+        $hashes = @(Get-ChildItem -LiteralPath $Path -Filter "*.sha512" -File -ErrorAction SilentlyContinue)
+
+        Write-Log "" -NoTimestamp
+        Write-Log "--- $DisplayName ---"
+        Write-Log "Каталог: $Path" -Level "INFO" -LogOnly
+        Write-Log "Архiвiв: $($archives.Count) | SHA512: $($hashes.Count) | Лiмiт: $KeepCount" -Level "INFO"
+
+        if ($KeepDays -gt 0) {
+            Write-Log "Лiмiт за вiком: $KeepDays дн." -Level "INFO"
+        }
+
+        if ($archives.Count -eq 0) {
+            Write-Log "Архiвiв не знайдено" -Level "INFO"
+            return $true
+        }
+
+        $keepSet = New-Object 'System.Collections.Generic.HashSet[string]'
+        $archivesToKeep = @($archives | Select-Object -First $KeepCount)
+
+        foreach ($archive in $archivesToKeep) {
+            [void]$keepSet.Add($archive.FullName.ToLowerInvariant())
+        }
+
+        $archivesToDelete = @()
+
+        foreach ($archive in $archives) {
+            $archiveKey = $archive.FullName.ToLowerInvariant()
+
+            if (-not $keepSet.Contains($archiveKey)) {
+                $archivesToDelete += $archive
+            }
+        }
+
+        # Optional age-based cleanup, but never delete the latest KeepCount because of age.
+        if ($KeepDays -gt 0 -and $archives.Count -gt $KeepCount) {
+            $cutoffDate = (Get-Date).AddDays(-1 * $KeepDays)
+            foreach ($archive in $archives) {
+                $archiveKey = $archive.FullName.ToLowerInvariant()
+                if (-not $keepSet.Contains($archiveKey) -and $archive.LastWriteTime -lt $cutoffDate -and ($archivesToDelete.FullName -notcontains $archive.FullName)) {
+                    $archivesToDelete += $archive
+                }
+            }
+        }
+
+        $deletedArchives = 0
+        $deletedHashes = 0
+        $plannedArchives = 0
+        $plannedHashes = 0
+
+        foreach ($archive in $archivesToDelete) {
+            $hashPath = "$($archive.FullName).sha512"
+
+            if ($global:DryRun) {
+                Write-Log "DRY-RUN: буде видалено архiв: $($archive.Name)" -Level "WARNING"
+                $plannedArchives++
+
+                if (Test-Path -LiteralPath $hashPath) {
+                    Write-Log "DRY-RUN: буде видалено SHA512: $(Split-Path $hashPath -Leaf)" -Level "WARNING"
+                    $plannedHashes++
+                }
+
+                continue
+            }
+
+            try {
+                Remove-Item -LiteralPath $archive.FullName -Force -ErrorAction Stop
+                Write-Log "Видалено архiв: $($archive.Name)" -Level "SUCCESS"
+                $deletedArchives++
+            } catch {
+                Write-Log "Помилка видалення архiву $($archive.Name): $($_.Exception.Message)" -Level "ERROR"
+            }
+
+            if (Test-Path -LiteralPath $hashPath) {
+                try {
+                    Remove-Item -LiteralPath $hashPath -Force -ErrorAction Stop
+                    Write-Log "Видалено SHA512: $(Split-Path $hashPath -Leaf)" -Level "SUCCESS"
+                    $deletedHashes++
+                } catch {
+                    Write-Log "Помилка видалення SHA512 $(Split-Path $hashPath -Leaf): $($_.Exception.Message)" -Level "ERROR"
+                }
+            }
+        }
+
+        # Orphan SHA512 cleanup: hash exists, archive does not.
+        $orphanHashes = @()
+        foreach ($hash in $hashes) {
+            $archivePath = $hash.FullName -replace '\.sha512$', ''
+            if (-not (Test-Path -LiteralPath $archivePath)) {
+                $orphanHashes += $hash
+            }
+        }
+
+        foreach ($hash in $orphanHashes) {
+            # Список хешів формується до видалення парних .sha512.
+            # Тому файл міг бути вже коректно видалений разом з архівом — це не помилка.
+            if (-not (Test-Path -LiteralPath $hash.FullName)) {
+                Write-Log "Orphan SHA512 вже видалено раніше: $($hash.Name)" -Level "DEBUG" -LogOnly
+                continue
+            }
+
+            if ($global:DryRun) {
+                Write-Log "DRY-RUN: буде видалено orphan SHA512: $($hash.Name)" -Level "WARNING"
+                $plannedHashes++
+                continue
+            }
+
+            try {
+                Remove-Item -LiteralPath $hash.FullName -Force -ErrorAction Stop
+                Write-Log "Видалено orphan SHA512: $($hash.Name)" -Level "SUCCESS"
+                $deletedHashes++
+            } catch [System.Management.Automation.ItemNotFoundException] {
+                Write-Log "Orphan SHA512 вже видалено раніше: $($hash.Name)" -Level "DEBUG" -LogOnly
+            } catch {
+                Write-Log "Помилка видалення orphan SHA512 $($hash.Name): $($_.Exception.Message)" -Level "ERROR"
+            }
+        }
+
+        if ($global:DryRun) {
+            if ($plannedArchives -eq 0 -and $plannedHashes -eq 0) {
+                Write-Log "DRY-RUN: видалення не потрiбне" -Level "INFO"
+            } else {
+                Write-Log "DRY-RUN: буде видалено архiвiв: $plannedArchives | SHA512: $plannedHashes" -Level "WARNING"
+            }
+        } else {
+            if ($deletedArchives -eq 0 -and $deletedHashes -eq 0) {
+                Write-Log "Видалення не потрiбне" -Level "INFO"
+            } else {
+                Write-Log "Видалено архiвiв: $deletedArchives | SHA512: $deletedHashes" -Level "SUCCESS"
+            }
+        }
+
+        return $true
+    } catch {
+        Write-Log "Помилка retention архiвiв ${ArchiveType}: $($_.Exception.Message)" -Level "ERROR"
+        return $false
+    }
+}
+
 function Sync-Folders {
     param(
         [string]$SourcePath,
@@ -2588,6 +2764,9 @@ function New-ArchivJsonReport {
             archive_prefix           = $archivePrefix
             archive_params           = if ($safeArchiveParams) { $safeArchiveParams } else { $archiveParams }
             archive_integrity_test_enabled = [bool]$enableArchiveIntegrityTest
+            archive_retention_enabled = [bool]$enableArchiveDeletion
+            archive_retention_keep_count = [int](Get-ArchivConfigValue -Name "archiveRetentionKeepCount" -DefaultValue $archiveVersions)
+            archive_retention_keep_days = [int](Get-ArchivConfigValue -Name "archiveRetentionKeepDays" -DefaultValue 0)
             free_space_reserve_gb    = $freeSpaceReserveGB
             archive_space_multiplier = $archiveSpaceMultiplier
             archives                 = $archiveReports
@@ -2944,13 +3123,12 @@ function Main {
         Write-Log "Синхронiзацiя BAZA вимкнена в налаштуваннях" -Level "DEBUG" -LogOnly
     }
     # <<< BAZA CONSOLE VISIBILITY PATCH: END
+    $archiveRetentionKeepCount = Get-ArchivConfigValue -Name "archiveRetentionKeepCount" -DefaultValue $archiveVersions
+    $archiveRetentionKeepDays = Get-ArchivConfigValue -Name "archiveRetentionKeepDays" -DefaultValue 0
 
-    if ($global:DryRun -and $enableArchiveDeletion) {
-        Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ==="
-        Write-Log "DRY-RUN: очищення старих архiвiв пропущено" -Level "WARNING"
-        Write-Log "==="
-    } elseif ($enableArchiveDeletion) {
-        Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ==="
+    if ($enableArchiveDeletion) {
+        Write-Log "=== RETENTION АРХIВIВ ==="
+
         foreach ($archiveType in $archiveDirs.Keys) {
             # Пропускаємо вимкнені компоненти
             $componentEnabled = $true
@@ -2958,16 +3136,29 @@ function Main {
                 "Model" { $componentEnabled = -not $excludeComponents.VETOFFICE }
                 "Blog" { $componentEnabled = -not $excludeComponents.Blog }
             }
-            
+
             if ($componentEnabled) {
-                Remove-OldFiles -Path $archiveDirs[$archiveType] -Filter "*.mdz" -KeepCount $archiveVersions -FileType "архiвiв $archiveType" | Out-Null
-                Remove-OldFiles -Path $archiveDirs[$archiveType] -Filter "*.sha512" -KeepCount $archiveVersions -FileType "хеш-файлiв $archiveType" | Out-Null
+                $archiveDisplayName = switch ($archiveType) {
+                    "Model" { "VETOFFICE" }
+                    "Blog"  { "BLOG" }
+                    default { $archiveType.ToUpperInvariant() }
+                }
+
+                Invoke-ArchivArchiveRetention `
+                    -Path $archiveDirs[$archiveType] `
+                    -ArchiveType $archiveType `
+                    -DisplayName $archiveDisplayName `
+                    -KeepCount ([int]$archiveRetentionKeepCount) `
+                    -KeepDays ([int]$archiveRetentionKeepDays) | Out-Null
+            } else {
+                Write-Log "Retention $archiveType пропущено: компонент вимкнено" -Level "DEBUG" -LogOnly
             }
         }
+
         Write-Log "==="
     } else {
-        Write-Log "=== ОЧИЩЕННЯ СТАРИХ АРХIВIВ ===" -LogOnly
-        Write-Log "Видалення старих архiвiв вимкнено в налаштуваннях" -Level "INFO" -LogOnly
+        Write-Log "=== RETENTION АРХIВIВ ===" -LogOnly
+        Write-Log "Retention архiвiв вимкнено в налаштуваннях" -Level "INFO" -LogOnly
         Write-Log "===" -LogOnly
     }
     
