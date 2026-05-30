@@ -68,7 +68,7 @@ $archivePrefix = "vetcontrol_dev_pnmgu_v2508"
 # Рекомендовано залишити розширення .mdz у назві архіву, а формат архіву явно задати через -tzip або інший потрібний формат.
 #
 # Приклад ZIP-сумісного архіву:
-$archiveParams = "a -mmt -mx9 -r -y -ssw -scrcSHA256 -bb0 -aoa"
+$archiveParams = "a -mmt -mx9 -r -y -ssw -scrcSHA512 -bb0 -aoa"
 
 # Пароль архiву з Windows Credential Manager.
 # Зберегти:
@@ -241,3 +241,10 @@ $enableEmailNotify = $false
 $enableNotifyOnSuccess = $false
 $enableNotifyOnWarning = $true
 $enableNotifyOnError = $true
+
+# НАЛАШТУВАННЯ ПЕРЕВIРКИ НАДIЙНОСТI АРХIВIВ v2.5
+$global:enableArchiveSizeValidation = $true        # Перевiряти, що архiв не має пiдозрiло малого розмiру
+$global:minimumArchiveSizeMB = 1                   # Мiнiмальний розмiр архiву в MB; 0 = не перевiряти
+$global:minimumArchivePercentOfSource = 0.1        # Мiнiмальна частка архiву вiд розмiру джерела у %; 0 = не перевiряти
+$global:enableArchiveTestRestore = $false          # Виконувати тестове вiдновлення архiву у тимчасовий каталог
+$global:archiveTestRestoreTempPath = "$env:TEMP\ARCHIV_VETOFFICE_TEST_RESTORE"

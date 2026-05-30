@@ -951,7 +951,15 @@ function Invoke-ArchivArchiveRetention {
 
         $hashes = @(Get-ChildItem -LiteralPath $Path -Filter "*.sha512" -File -ErrorAction SilentlyContinue)
 
-        Write-Log "" -NoTimestamp
+        if ($script:skipNextRetentionBlankLine) {
+
+            $script:skipNextRetentionBlankLine = $false
+
+        } else {
+
+            Write-Log "" -NoTimestamp
+
+        }
         Write-Log "--- $DisplayName ---"
         Write-Log "Каталог: $Path" -Level "INFO" -LogOnly
         Write-Log "Архiвiв: $($archives.Count) | SHA512: $($hashes.Count) | Лiмiт: $KeepCount" -Level "INFO"
@@ -1764,6 +1772,182 @@ function Test-ArchiveIntegrity {
         return $false
     }
 }
+function Test-ArchivArchiveSizePolicy {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ArchivePath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$SourcePath,
+
+        [string]$ArchiveType = "ARCHIVE"
+    )
+
+    $enableArchiveSizeValidation = [bool](Get-ArchivConfigValue -Name "enableArchiveSizeValidation" -DefaultValue $true)
+    if (-not $enableArchiveSizeValidation) {
+        Write-Log "Перевiрка розмiру архiву вимкнена: $ArchiveType" -Level "DEBUG" -LogOnly
+        return $true
+    }
+
+    if ($global:DryRun) {
+        Write-Log "DRY-RUN: перевiрка розмiру архiву пропущена: $ArchiveType" -Level "WARNING"
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $ArchivePath)) {
+        Write-Log "Архiв для перевiрки розмiру не знайдено: $ArchivePath" -Level "ERROR"
+        return $false
+    }
+
+    $minimumArchiveSizeMB = [double](Get-ArchivConfigValue -Name "minimumArchiveSizeMB" -DefaultValue 1)
+    $minimumArchivePercentOfSource = [double](Get-ArchivConfigValue -Name "minimumArchivePercentOfSource" -DefaultValue 0.1)
+
+    $archiveItem = Get-Item -LiteralPath $ArchivePath -ErrorAction Stop
+    $archiveSizeBytes = [double]$archiveItem.Length
+    $archiveSizeMB = [math]::Round(($archiveSizeBytes / 1MB), 2)
+
+    $sourceSizeBytes = [double](Get-PathSizeBytes -Path $SourcePath)
+    $sourceSizeMB = if ($sourceSizeBytes -gt 0) { [math]::Round(($sourceSizeBytes / 1MB), 2) } else { 0 }
+    $archivePercentOfSource = if ($sourceSizeBytes -gt 0) { [math]::Round((($archiveSizeBytes / $sourceSizeBytes) * 100), 3) } else { 0 }
+
+    Write-Log "Перевiрка розмiру архiву ${ArchiveType}: архiв=$archiveSizeMB MB; джерело=$sourceSizeMB MB; частка=$archivePercentOfSource%" -Level "INFO"
+
+    if ($minimumArchiveSizeMB -gt 0 -and $archiveSizeMB -lt $minimumArchiveSizeMB) {
+        Write-Log "Пiдозрiло малий архiв ${ArchiveType}: $archiveSizeMB MB < $minimumArchiveSizeMB MB" -Level "ERROR"
+        return $false
+    }
+
+    if ($minimumArchivePercentOfSource -gt 0 -and $sourceSizeBytes -gt 0 -and $archivePercentOfSource -lt $minimumArchivePercentOfSource) {
+        Write-Log "Пiдозрiло малий архiв ${ArchiveType}: $archivePercentOfSource% вiд джерела < $minimumArchivePercentOfSource%" -Level "ERROR"
+        return $false
+    }
+
+    Write-Log "Перевiрка розмiру архiву пройдена: $ArchiveType" -Level "SUCCESS"
+    return $true
+}
+
+function Test-ArchivArchiveRestore {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ArchivePath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ArcPath,
+
+        [string]$ArchiveType = "ARCHIVE",
+
+        [int]$TimeoutSeconds = 900
+    )
+
+    $enableArchiveTestRestore = [bool](Get-ArchivConfigValue -Name "enableArchiveTestRestore" -DefaultValue $false)
+    if (-not $enableArchiveTestRestore) {
+        Write-Log "Test Restore вимкнено: $ArchiveType" -Level "DEBUG" -LogOnly
+        return $true
+    }
+
+    if ($global:DryRun) {
+        Write-Log "DRY-RUN: Test Restore пропущено: $(Split-Path $ArchivePath -Leaf)" -Level "WARNING"
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $ArchivePath)) {
+        Write-Log "Архiв для Test Restore не знайдено: $ArchivePath" -Level "ERROR"
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $ArcPath)) {
+        Write-Log "7-Zip не знайдено для Test Restore: $ArcPath" -Level "ERROR"
+        return $false
+    }
+
+    $restoreRoot = Get-ArchivConfigValue -Name "archiveTestRestoreTempPath" -DefaultValue (Join-Path $env:TEMP "ARCHIV_VETOFFICE_TEST_RESTORE")
+    $restoreSession = "{0}_{1}_{2}" -f $ArchiveType, (Get-Date -Format "yyyyMMdd_HHmmss"), ([Guid]::NewGuid().ToString("N").Substring(0, 8))
+    $restorePath = Join-Path $restoreRoot $restoreSession
+
+    Write-Log "Test Restore архiву: $(Split-Path $ArchivePath -Leaf)" -Level "INFO"
+
+    try {
+        if (Test-Path -LiteralPath $restorePath) {
+            Remove-Item -LiteralPath $restorePath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        New-Item -ItemType Directory -Path $restorePath -Force | Out-Null
+
+        Set-ArchivWindowTitle -Stage "Test Restore $ArchiveType"
+
+        $archivePassword = Get-ArchivArchivePassword
+        $passwordSwitch = ""
+        if (-not [string]::IsNullOrWhiteSpace($archivePassword)) {
+            $passwordSwitch = "-p`"$archivePassword`""
+        }
+
+        $arguments = "x -y -bb0 $passwordSwitch -o`"$restorePath`" `"$ArchivePath`""
+
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $ArcPath
+        $processInfo.Arguments = $arguments
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+        $processInfo.RedirectStandardInput = $true
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        $process.Start() | Out-Null
+        Add-ProcessToArchivKillOnCloseJob -Process $process
+
+        try {
+            $process.StandardInput.WriteLine("")
+            $process.StandardInput.Close()
+        } catch {
+        }
+
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch {}
+            Write-Log "Test Restore перевищив timeout $TimeoutSeconds сек: $ArchivePath" -Level "ERROR"
+            return $false
+        }
+
+        $standardOutput = $process.StandardOutput.ReadToEnd()
+        $errorOutput = $process.StandardError.ReadToEnd()
+
+        if ($process.ExitCode -ne 0) {
+            Write-Log "Помилка Test Restore 7-Zip (код: $($process.ExitCode)): $ArchivePath" -Level "ERROR"
+            if (-not [string]::IsNullOrWhiteSpace($errorOutput)) {
+                Write-Log "7-Zip restore stderr: $errorOutput" -Level "ERROR"
+            }
+            if (-not [string]::IsNullOrWhiteSpace($standardOutput)) {
+                Write-Log "7-Zip restore stdout: $standardOutput" -Level "ERROR" -LogOnly
+            }
+            return $false
+        }
+
+        $restoredFiles = @(Get-ChildItem -LiteralPath $restorePath -Recurse -File -ErrorAction SilentlyContinue)
+        $restoredSizeBytes = 0
+        foreach ($file in $restoredFiles) {
+            $restoredSizeBytes += [double]$file.Length
+        }
+
+        if ($restoredFiles.Count -le 0 -or $restoredSizeBytes -le 0) {
+            Write-Log "Test Restore не пройдено: файли не вiдновлено або розмiр 0: $ArchiveType" -Level "ERROR"
+            return $false
+        }
+
+        Write-Log "Test Restore пройдено: $ArchiveType; файлiв=$($restoredFiles.Count); розмiр=$(Format-FileSize -Bytes $restoredSizeBytes)" -Level "SUCCESS"
+        return $true
+    }
+    catch {
+        Write-Log "Помилка Test Restore ${ArchiveType}: $($_.Exception.Message)" -Level "ERROR"
+        return $false
+    }
+    finally {
+        if (Test-Path -LiteralPath $restorePath) {
+            Remove-Item -LiteralPath $restorePath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function New-Archive {
     param(
         [string]$SourcePath,
@@ -3319,11 +3503,31 @@ function Main {
             $hashPath = "$archivePath.sha512"
             $hashSuccess = New-SHA512Hash -FilePath $archivePath -HashFilePath $hashPath
             $hashVerifySuccess = $false
+            $archiveSizePolicySuccess = $false
+            $restoreTestSuccess = $false
             if ($hashSuccess) {
                 Set-ArchivWindowTitle -Stage "SHA512 test $($archive.Type)"
                 Write-Log "" -NoTimestamp
                 Write-Log "--- ПЕРЕВIРКА SHA512 $($archive.Type) ---"
                 $hashVerifySuccess = Test-SHA512Hash -FilePath $archivePath -HashFilePath $hashPath -ArchiveType $archive.Type
+            if ($hashSuccess -and $hashVerifySuccess) {
+                Set-ArchivWindowTitle -Stage "Перевiрка розмiру $($archive.Type)"
+                Write-Log "" -NoTimestamp
+                Write-Log "--- ПЕРЕВIРКА РОЗМIРУ АРХIВУ $($archive.Type) ---"
+                $archiveSizePolicySuccess = Test-ArchivArchiveSizePolicy -ArchivePath $archivePath -SourcePath $archive.Source -ArchiveType $archive.Type
+            }
+            $enableArchiveTestRestoreRuntime = [bool](Get-ArchivConfigValue -Name "enableArchiveTestRestore" -DefaultValue $false)
+            if ($hashSuccess -and $hashVerifySuccess -and $archiveSizePolicySuccess) {
+                if ($enableArchiveTestRestoreRuntime) {
+                    Set-ArchivWindowTitle -Stage "Test Restore $($archive.Type)"
+                    Write-Log "" -NoTimestamp
+                    Write-Log "--- TEST RESTORE $($archive.Type) ---"
+                    $restoreTestSuccess = Test-ArchivArchiveRestore -ArchivePath $archivePath -ArcPath $arcPath -ArchiveType $archive.Type
+                } else {
+                    $restoreTestSuccess = $true
+                    Write-Log "Test Restore вимкнено: $($archive.Type)" -Level "DEBUG" -LogOnly
+                }
+            }
             }
             
             $results[$archive.Type] = @{
@@ -3333,6 +3537,9 @@ function Main {
                 HashSuccess = ($hashSuccess -and $hashVerifySuccess)
                 HashCreated = $hashSuccess
                 HashVerifySuccess = $hashVerifySuccess
+                ArchiveSizePolicySuccess = $archiveSizePolicySuccess
+                RestoreTestSuccess = $restoreTestSuccess
+                ArchiveValidationSuccess = ($hashSuccess -and $hashVerifySuccess -and $archiveSizePolicySuccess -and $restoreTestSuccess)
             }
         } else {
             $results[$archive.Type] = @{
@@ -3340,6 +3547,9 @@ function Main {
                 HashSuccess = $false
                 HashCreated = $false
                 HashVerifySuccess = $false
+                ArchiveSizePolicySuccess = $false
+                RestoreTestSuccess = $false
+                ArchiveValidationSuccess = $false
             }
         }
     }
@@ -3383,31 +3593,36 @@ function Main {
             $uploadTotal = 0
             
             # Завантаження VETOFFICE
-            if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
+            if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess -and $results["VETOFFICE"].ArchiveValidationSuccess) {
                 $uploadTotal += 2
                 
+                Write-Log "" -NoTimestamp
                 Write-Log "--- ЗАВАНТАЖЕННЯ АРХІВУ VETOFFICE НА SFTP ---"
                 $archiveUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["VETOFFICE"].ArchivePath -RemoteDirectory $sftpDirectories["Model"]
                 if ($archiveUpload) { $uploadSuccess++ }
                 
+                Write-Log "" -NoTimestamp
                 Write-Log "--- ЗАВАНТАЖЕННЯ ХЕШУ АРХІВУ VETOFFICE НА SFTP ---"
                 $hashUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["VETOFFICE"].HashPath -RemoteDirectory $sftpDirectories["Model"]
                 if ($hashUpload) { $uploadSuccess++ }
             }
             
             # Завантаження BLOG
-            if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess) {
+            if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess -and $results["BLOG"].ArchiveValidationSuccess) {
                 $uploadTotal += 2
                 
+                Write-Log "" -NoTimestamp
                 Write-Log "--- ЗАВАНТАЖЕННЯ АРХІВУ BLOG НА SFTP ---"
                 $archiveUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].ArchivePath -RemoteDirectory $sftpDirectories["BLOG"]
                 if ($archiveUpload) { $uploadSuccess++ }
                 
+                Write-Log "" -NoTimestamp
                 Write-Log "--- ЗАВАНТАЖЕННЯ ХЕШУ АРХІВУ BLOG НА SFTP ---"
                 $hashUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].HashPath -RemoteDirectory $sftpDirectories["BLOG"]
                 if ($hashUpload) { $uploadSuccess++ }
             }
             
+            Write-Log "" -NoTimestamp
             Write-Log "--- ПІДСУМОК ЗАВАНТАЖЕННЯ НА SFTP ---"
             $script:sftpUploadSuccess = [int]$uploadSuccess
             $script:sftpUploadTotal = [int]$uploadTotal
@@ -3452,7 +3667,7 @@ function Main {
             $copyTotal = 0
             
             # Копіювання VETOFFICE
-            if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
+            if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess -and $results["VETOFFICE"].ArchiveValidationSuccess) {
                 $copyTotal += 2
                 
                 Write-Log "--- КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ АРХІВУ VETOFFICE ---"
@@ -3465,7 +3680,7 @@ function Main {
             }
             
             # Копіювання BLOG
-            if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess) {
+            if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess -and $results["BLOG"].ArchiveValidationSuccess) {
                 $copyTotal += 2
                 
                 Write-Log "--- КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ АРХІВУ BLOG ---"
@@ -3550,7 +3765,7 @@ function Main {
 
     if ($enableArchiveDeletion) {
         Write-Log "=== RETENTION АРХIВIВ ==="
-
+        $script:skipNextRetentionBlankLine = $true
         foreach ($archiveType in $archiveDirs.Keys) {
             # Пропускаємо вимкнені компоненти
             $componentEnabled = $true
@@ -3609,7 +3824,7 @@ function Main {
     $duration = $scriptEndTime - $scriptStartTime
     
     Set-ArchivWindowTitle -Stage "Завершено"
-    Write-Log "=== ЗАВЕРШЕННЯ РОБОТИ СКРИПТА ==="
+
     Write-Log "Час початку: $($scriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Час завершення: $($scriptEndTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Тривалiсть: $($duration.ToString('hh\:mm\:ss'))" -NoTimestamp
@@ -3630,11 +3845,11 @@ function Main {
     $copyTotal = 0
     Set-ArchivWindowTitle -Stage "Копiювання в мережу"
     if ($enableNetworkCopy -and -not $global:DryRun) {
-        if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
+        if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess -and $results["VETOFFICE"].ArchiveValidationSuccess) {
             $copyTotal += 2
             $copySuccess += 2
         }
-        if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess) {
+        if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess -and $results["BLOG"].ArchiveValidationSuccess) {
             $copyTotal += 2
             $copySuccess += 2
         }
@@ -3697,6 +3912,8 @@ function Main {
     $diskHealthCriticalGB = [int](Get-ArchivConfigValue -Name "diskHealthCriticalGB" -DefaultValue 10)
     $diskHealth = Get-ArchivDiskHealthSummary -Path $archivPath -WarningGB $diskHealthWarningGB -CriticalGB $diskHealthCriticalGB
 
+    Write-Log "==="
+
     Write-Log "=== ПЕРЕВIРКА ВIЛЬНОГО МIСЦЯ ==="
     if ($diskHealth.status -eq "critical") {
         Write-Log $diskHealth.message -Level "ERROR"
@@ -3723,7 +3940,8 @@ function Main {
     
     Update-ArchivHistory -ReportPath $global:jsonReportFile | Out-Null
     Test-ArchivBackupHealth
-Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
+    Write-Log "=== ЗАВЕРШЕННЯ РОБОТИ СКРИПТА ===" -NoTimestamp
+    Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Лог-файл: $logFile" -NoTimestamp
     Write-Log "==="
 
