@@ -923,7 +923,21 @@ function Invoke-ArchivArchiveRetention {
 
     if (-not (Test-Path -LiteralPath $Path)) {
         Write-Log "Каталог архiвiв не знайдено: $Path" -Level "WARNING"
-        return $false
+        return [PSCustomObject]@{
+            type = $ArchiveType
+            display_name = $DisplayName
+            path = $Path
+            enabled = $true
+            status = "missing_path"
+            archives_before = 0
+            hashes_before = 0
+            keep_count = $KeepCount
+            keep_days = $KeepDays
+            deleted_archives = 0
+            deleted_hashes = 0
+            planned_delete_archives = 0
+            planned_delete_hashes = 0
+        }
     }
 
     if ($KeepCount -lt 1) {
@@ -948,7 +962,21 @@ function Invoke-ArchivArchiveRetention {
 
         if ($archives.Count -eq 0) {
             Write-Log "Архiвiв не знайдено" -Level "INFO"
-            return $true
+            return [PSCustomObject]@{
+                type = $ArchiveType
+                display_name = $DisplayName
+                path = $Path
+                enabled = $true
+                status = "empty"
+                archives_before = 0
+                hashes_before = $hashes.Count
+                keep_count = $KeepCount
+                keep_days = $KeepDays
+                deleted_archives = 0
+                deleted_hashes = 0
+                planned_delete_archives = 0
+                planned_delete_hashes = 0
+            }
         }
 
         $keepSet = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -1066,10 +1094,45 @@ function Invoke-ArchivArchiveRetention {
             }
         }
 
-        return $true
+        $retentionStatus = if ($global:DryRun) {
+            if ($plannedArchives -eq 0 -and $plannedHashes -eq 0) { "no_action" } else { "dry_run_planned" }
+        } else {
+            if ($deletedArchives -eq 0 -and $deletedHashes -eq 0) { "no_action" } else { "deleted" }
+        }
+
+        return [PSCustomObject]@{
+            type = $ArchiveType
+            display_name = $DisplayName
+            path = $Path
+            enabled = $true
+            status = $retentionStatus
+            archives_before = $archives.Count
+            hashes_before = $hashes.Count
+            keep_count = $KeepCount
+            keep_days = $KeepDays
+            deleted_archives = $deletedArchives
+            deleted_hashes = $deletedHashes
+            planned_delete_archives = $plannedArchives
+            planned_delete_hashes = $plannedHashes
+        }
     } catch {
         Write-Log "Помилка retention архiвiв ${ArchiveType}: $($_.Exception.Message)" -Level "ERROR"
-        return $false
+        return [PSCustomObject]@{
+            type = $ArchiveType
+            display_name = $DisplayName
+            path = $Path
+            enabled = $true
+            status = "error"
+            error = $_.Exception.Message
+            archives_before = 0
+            hashes_before = 0
+            keep_count = $KeepCount
+            keep_days = $KeepDays
+            deleted_archives = 0
+            deleted_hashes = 0
+            planned_delete_archives = 0
+            planned_delete_hashes = 0
+        }
     }
 }
 
@@ -2638,6 +2701,134 @@ function Test-ArchivBackupHealth {
     }
 }
 # <<< HISTORY / STATS / HEALTH PATCH: END
+
+function Get-ArchivDiskHealthSummary {
+    param(
+        [string]$Path,
+        [int]$WarningGB = 20,
+        [int]$CriticalGB = 10
+    )
+
+    try {
+        $resolvedPath = $Path
+        while (-not [string]::IsNullOrWhiteSpace($resolvedPath) -and -not (Test-Path -LiteralPath $resolvedPath)) {
+            $parent = Split-Path -Parent $resolvedPath
+            if ($parent -eq $resolvedPath) { break }
+            $resolvedPath = $parent
+        }
+
+        if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+            return [PSCustomObject]@{
+                path = $Path
+                status = "unknown"
+                free_bytes = $null
+                free_text = $null
+                warning_gb = $WarningGB
+                critical_gb = $CriticalGB
+                message = "Шлях для перевiрки мiсця не знайдено"
+            }
+        }
+
+        $root = [System.IO.Path]::GetPathRoot($resolvedPath)
+        $driveName = $root.Substring(0,1)
+        $drive = Get-PSDrive -Name $driveName -ErrorAction Stop
+        $freeBytes = [int64]$drive.Free
+        $freeGB = [math]::Round($freeBytes / 1GB, 2)
+
+        $status = "ok"
+        $message = "Вiльного мiсця достатньо: $(Format-FileSize -Bytes $freeBytes)"
+
+        if ($freeGB -lt $CriticalGB) {
+            $status = "critical"
+            $message = "КРИТИЧНО: вiльного мiсця менше $CriticalGB GB: $(Format-FileSize -Bytes $freeBytes)"
+        } elseif ($freeGB -lt $WarningGB) {
+            $status = "warning"
+            $message = "УВАГА: вiльного мiсця менше $WarningGB GB: $(Format-FileSize -Bytes $freeBytes)"
+        }
+
+        return [PSCustomObject]@{
+            path = $Path
+            status = $status
+            free_bytes = $freeBytes
+            free_text = Format-FileSize -Bytes $freeBytes
+            warning_gb = $WarningGB
+            critical_gb = $CriticalGB
+            message = $message
+        }
+    } catch {
+        return [PSCustomObject]@{
+            path = $Path
+            status = "unknown"
+            free_bytes = $null
+            free_text = $null
+            warning_gb = $WarningGB
+            critical_gb = $CriticalGB
+            message = "Помилка перевiрки вiльного мiсця: $($_.Exception.Message)"
+        }
+    }
+}
+
+function Write-ArchivNotificationPlan {
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Results,
+
+        [object]$DiskHealth,
+
+        [array]$RetentionStats
+    )
+
+    $notifyOnSuccess = [bool](Get-ArchivConfigValue -Name "enableNotifyOnSuccess" -DefaultValue $false)
+    $notifyOnWarning = [bool](Get-ArchivConfigValue -Name "enableNotifyOnWarning" -DefaultValue $true)
+    $notifyOnError = [bool](Get-ArchivConfigValue -Name "enableNotifyOnError" -DefaultValue $true)
+
+    $telegramEnabled = [bool](Get-ArchivConfigValue -Name "enableTelegramNotify" -DefaultValue $false)
+    $emailEnabled = [bool](Get-ArchivConfigValue -Name "enableEmailNotify" -DefaultValue $false)
+
+    $failedArchives = @($Results.Values | Where-Object { -not $_.ArchiveSuccess })
+    $failedHashes = @($Results.Values | Where-Object { -not $_.HashSuccess })
+    $hasError = (($failedArchives.Count -gt 0) -or ($failedHashes.Count -gt 0))
+    $hasWarning = $false
+
+    if ($DiskHealth -and ($DiskHealth.status -eq "warning" -or $DiskHealth.status -eq "critical")) {
+        $hasWarning = $true
+        if ($DiskHealth.status -eq "critical") { $hasError = $true }
+    }
+
+    $eventType = if ($hasError) { "error" } elseif ($hasWarning) { "warning" } else { "success" }
+
+    $shouldNotify = switch ($eventType) {
+        "error"   { $notifyOnError }
+        "warning" { $notifyOnWarning }
+        default   { $notifyOnSuccess }
+    }
+
+    $channels = @()
+    if ($telegramEnabled) { $channels += "Telegram" }
+    if ($emailEnabled) { $channels += "Email" }
+
+    if (-not $shouldNotify -or $channels.Count -eq 0) {
+        Write-Log "Сповiщення: не потрiбне або канали вимкненi ($eventType)" -Level "DEBUG" -LogOnly
+        return [PSCustomObject]@{
+            enabled = $false
+            event_type = $eventType
+            should_notify = $shouldNotify
+            channels = $channels
+            status = "skipped"
+        }
+    }
+
+    Write-Log "Сповiщення: заплановано ($eventType) через $($channels -join ', ')" -Level "INFO" -LogOnly
+
+    return [PSCustomObject]@{
+        enabled = $true
+        event_type = $eventType
+        should_notify = $shouldNotify
+        channels = $channels
+        status = "planned"
+    }
+}
+
 # >>> JSON REPORT PATCH: BEGIN
 function Get-ArchivFileSizeSafe {
     param([string]$Path)
@@ -2682,6 +2873,12 @@ function New-ArchivJsonReport {
 
         [Parameter(Mandatory=$true)]
         [array]$Archives,
+
+        [array]$RetentionStats = @(),
+
+        [object]$DiskHealth = $null,
+
+        [object]$NotificationPlan = $null,
 
         [string]$ReportPath
     )
@@ -2767,6 +2964,14 @@ function New-ArchivJsonReport {
             archive_retention_enabled = [bool]$enableArchiveDeletion
             archive_retention_keep_count = [int](Get-ArchivConfigValue -Name "archiveRetentionKeepCount" -DefaultValue $archiveVersions)
             archive_retention_keep_days = [int](Get-ArchivConfigValue -Name "archiveRetentionKeepDays" -DefaultValue 0)
+            retention                = [PSCustomObject]@{
+                enabled = [bool]$enableArchiveDeletion
+                keep_count = [int](Get-ArchivConfigValue -Name "archiveRetentionKeepCount" -DefaultValue $archiveVersions)
+                keep_days = [int](Get-ArchivConfigValue -Name "archiveRetentionKeepDays" -DefaultValue 0)
+                components = $RetentionStats
+            }
+            disk_health              = $DiskHealth
+            notifications            = $NotificationPlan
             free_space_reserve_gb    = $freeSpaceReserveGB
             archive_space_multiplier = $archiveSpaceMultiplier
             archives                 = $archiveReports
@@ -3125,6 +3330,7 @@ function Main {
     # <<< BAZA CONSOLE VISIBILITY PATCH: END
     $archiveRetentionKeepCount = Get-ArchivConfigValue -Name "archiveRetentionKeepCount" -DefaultValue $archiveVersions
     $archiveRetentionKeepDays = Get-ArchivConfigValue -Name "archiveRetentionKeepDays" -DefaultValue 0
+    $retentionStats = @()
 
     if ($enableArchiveDeletion) {
         Write-Log "=== RETENTION АРХIВIВ ==="
@@ -3144,12 +3350,16 @@ function Main {
                     default { $archiveType.ToUpperInvariant() }
                 }
 
-                Invoke-ArchivArchiveRetention `
+                $retentionResult = Invoke-ArchivArchiveRetention `
                     -Path $archiveDirs[$archiveType] `
                     -ArchiveType $archiveType `
                     -DisplayName $archiveDisplayName `
                     -KeepCount ([int]$archiveRetentionKeepCount) `
-                    -KeepDays ([int]$archiveRetentionKeepDays) | Out-Null
+                    -KeepDays ([int]$archiveRetentionKeepDays)
+
+                if ($retentionResult) {
+                    $retentionStats += $retentionResult
+                }
             } else {
                 Write-Log "Retention $archiveType пропущено: компонент вимкнено" -Level "DEBUG" -LogOnly
             }
@@ -3160,6 +3370,11 @@ function Main {
         Write-Log "=== RETENTION АРХIВIВ ===" -LogOnly
         Write-Log "Retention архiвiв вимкнено в налаштуваннях" -Level "INFO" -LogOnly
         Write-Log "===" -LogOnly
+        $retentionStats += [PSCustomObject]@{
+            enabled = $false
+            status = "disabled"
+            components = @()
+        }
     }
     
     Set-ArchivWindowTitle -Stage "Очищення старих логiв"
@@ -3263,11 +3478,32 @@ function Main {
     }
     
     Write-Log "" -NoTimestamp
+    # Перевiрка вiльного мiсця наприкiнцi роботи
+    $diskHealthWarningGB = [int](Get-ArchivConfigValue -Name "diskHealthWarningGB" -DefaultValue 20)
+    $diskHealthCriticalGB = [int](Get-ArchivConfigValue -Name "diskHealthCriticalGB" -DefaultValue 10)
+    $diskHealth = Get-ArchivDiskHealthSummary -Path $archivPath -WarningGB $diskHealthWarningGB -CriticalGB $diskHealthCriticalGB
+
+    Write-Log "=== ПЕРЕВIРКА ВIЛЬНОГО МIСЦЯ ==="
+    if ($diskHealth.status -eq "critical") {
+        Write-Log $diskHealth.message -Level "ERROR"
+    } elseif ($diskHealth.status -eq "warning") {
+        Write-Log $diskHealth.message -Level "WARNING"
+    } elseif ($diskHealth.status -eq "unknown") {
+        Write-Log $diskHealth.message -Level "WARNING"
+    } else {
+        Write-Log $diskHealth.message -Level "SUCCESS"
+    }
+    Write-Log "==="
+
+    $notificationPlan = Write-ArchivNotificationPlan -Results $results -DiskHealth $diskHealth -RetentionStats $retentionStats
     New-ArchivJsonReport `
         -StartedAt $scriptStartTime `
         -FinishedAt $scriptEndTime `
         -Results $results `
         -Archives $archives `
+        -RetentionStats $retentionStats `
+        -DiskHealth $diskHealth `
+        -NotificationPlan $notificationPlan `
         -ReportPath $global:jsonReportFile | Out-Null
 
     

@@ -218,3 +218,26 @@ $showPerformanceInfo = $false
 
 # Режим сумісності, якщо потрібен для старих середовищ
 $compatibilityMode = $false
+
+# =============================================
+# HEALTH-CHECK ВІЛЬНОГО МІСЦЯ
+# =============================================
+
+# WARNING, якщо після виконання вільного місця менше цього значення.
+$diskHealthWarningGB = 20
+
+# ERROR, якщо після виконання вільного місця менше цього значення.
+$diskHealthCriticalGB = 10
+# =============================================
+# СПОВІЩЕННЯ
+# =============================================
+
+# Каркас для майбутніх сповіщень.
+# У v2.3 поки формується тільки план сповіщення у JSON/логах.
+$enableTelegramNotify = $false
+$enableEmailNotify = $false
+
+# Коли формувати сповіщення.
+$enableNotifyOnSuccess = $false
+$enableNotifyOnWarning = $true
+$enableNotifyOnError = $true
