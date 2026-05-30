@@ -2914,7 +2914,7 @@ function Update-ArchivHistory {
         $historyJson = $history | ConvertTo-Json -Depth 8
         [System.IO.File]::WriteAllText($HistoryPath, $historyJson, [System.Text.Encoding]::UTF8)
 
-        Write-Log "Iсторiю запускiв оновлено: $HistoryPath" -Level "SUCCESS"
+        Write-Log "Iсторiю запускiв оновлено: $HistoryPath" -Level "DEBUG"
         return $true
     } catch {
         Write-Log "Помилка оновлення history.json: $($_.Exception.Message)" -Level "ERROR"
@@ -2994,18 +2994,18 @@ function Test-ArchivBackupHealth {
             $HistoryPath = Join-Path $logPath "history.json"
         }
 
-        Write-Log "=== СТАН РЕЗЕРВНИХ КОПIЙ ==="
+        Write-Log "=== СТАН РЕЗЕРВНИХ КОПIЙ ===" -Level "DEBUG" -LogOnly
 
         if (-not (Test-Path -LiteralPath $HistoryPath)) {
-            Write-Log "history.json ще не створено. Стан резервних копiй буде доступний пiсля першого запуску." -Level "WARNING"
-            Write-Log "==="
+            Write-Log "history.json ще не створено. Стан резервних копiй буде доступний пiсля першого запуску." -Level "DEBUG" -LogOnly
+            Write-Log "===" -Level "DEBUG" -LogOnly
             return
         }
 
         $historyRaw = Get-Content -LiteralPath $HistoryPath -Raw
         if ([string]::IsNullOrWhiteSpace($historyRaw)) {
-            Write-Log "history.json порожнiй" -Level "WARNING"
-            Write-Log "==="
+            Write-Log "history.json порожнiй" -Level "DEBUG" -LogOnly
+            Write-Log "===" -Level "DEBUG" -LogOnly
             return
         }
 
@@ -3023,12 +3023,12 @@ function Test-ArchivBackupHealth {
 
         if ($null -ne $lastAnyRun) {
             $lastAnyRunIsDryRun = ConvertTo-ArchivBool $lastAnyRun.dry_run
-            Write-Log "Останнiй запуск: $($lastAnyRun.started_at)$(if ($lastAnyRunIsDryRun) { ' (DRY-RUN)' } else { '' })" -NoTimestamp
+            Write-Log "Останнiй запуск: $($lastAnyRun.started_at)$(if ($lastAnyRunIsDryRun) { ' (DRY-RUN)' } else { '' })" -Level "DEBUG" -LogOnly -NoTimestamp
         }
 
         if ($successfulRealRuns.Count -eq 0) {
-            Write-Log "У history.json немає успiшних реальних запускiв архiвацiї" -Level "WARNING"
-            Write-Log "==="
+            Write-Log "У history.json немає успiшних реальних запускiв архiвацiї" -Level "DEBUG" -LogOnly
+            Write-Log "===" -Level "DEBUG" -LogOnly
             return
         }
 
@@ -3038,8 +3038,8 @@ function Test-ArchivBackupHealth {
         $ageText = Format-ArchivAgeText -Age $age
         $lastSuccessText = $lastSuccessDate.ToString("yyyy-MM-dd HH:mm:ss")
 
-        Write-Log "Останнiй успiшний архiв: $lastSuccessText ($ageText)" -NoTimestamp
-        Write-Log "Архiвiв у запуску: $($lastSuccess.archives_success) з $($lastSuccess.archives_count)" -NoTimestamp
+        Write-Log "Останнiй успiшний архiв: $lastSuccessText ($ageText)" -Level "DEBUG" -LogOnly -NoTimestamp
+        Write-Log "Архiвiв у запуску: $($lastSuccess.archives_success) з $($lastSuccess.archives_count)" -Level "DEBUG" -LogOnly -NoTimestamp
 
         if ($lastSuccess.total_source_size_text -and $lastSuccess.total_archive_size_text) {
             $savedPercent = Get-ArchivCompressionSavedPercent `
@@ -3047,29 +3047,29 @@ function Test-ArchivBackupHealth {
                 -ArchiveBytes ([int64]$lastSuccess.total_archive_size_bytes)
 
             if ($null -ne $savedPercent) {
-                Write-Log "Стиснення: $($lastSuccess.total_source_size_text) -> $($lastSuccess.total_archive_size_text) ($savedPercent%)" -NoTimestamp
+                Write-Log "Стиснення: $($lastSuccess.total_source_size_text) -> $($lastSuccess.total_archive_size_text) ($savedPercent%)" -Level "DEBUG" -LogOnly -NoTimestamp
             } else {
-                Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -NoTimestamp
-                Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -NoTimestamp
+                Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -Level "DEBUG" -LogOnly -NoTimestamp
+                Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -Level "DEBUG" -LogOnly -NoTimestamp
             }
         } else {
-            Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -NoTimestamp
+            Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -Level "DEBUG" -LogOnly -NoTimestamp
             if ($lastSuccess.total_archive_size_text) {
-                Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -NoTimestamp
+                Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -Level "DEBUG" -LogOnly -NoTimestamp
             }
         }
 
         if ($age.TotalDays -ge $CriticalDays) {
-            Write-Log "КРИТИЧНО: останнiй успiшний архiв старший за $CriticalDays дн." -Level "ERROR"
+            Write-Log "КРИТИЧНО: останнiй успiшний архiв старший за $CriticalDays дн." -Level "DEBUG" -LogOnly
         } elseif ($age.TotalDays -ge $WarningDays) {
-            Write-Log "УВАГА: останнiй успiшний архiв старший за $WarningDays дн." -Level "WARNING"
+            Write-Log "УВАГА: останнiй успiшний архiв старший за $WarningDays дн." -Level "DEBUG" -LogOnly
         } else {
-            Write-Log "Стан резервних копiй: OK" -Level "SUCCESS"
+            Write-Log "Стан резервних копiй: OK" -Level "DEBUG" -LogOnly
         }
 
-        Write-Log "==="
+        Write-Log "===" -Level "DEBUG" -LogOnly
     } catch {
-        Write-Log "Помилка перевiрки стану резервних копiй: $($_.Exception.Message)" -Level "WARNING"
+        Write-Log "Помилка перевiрки стану резервних копiй: $($_.Exception.Message)" -Level "DEBUG" -LogOnly
     }
 }
 # <<< HISTORY / STATS / HEALTH PATCH: END
@@ -3374,7 +3374,7 @@ function New-ArchivJsonReport {
         $json = $report | ConvertTo-Json -Depth 8
         [System.IO.File]::WriteAllText($ReportPath, $json, [System.Text.Encoding]::UTF8)
 
-        Write-Log "JSON-звiт створено: $ReportPath" -Level "SUCCESS"
+        Write-Log "JSON-звiт створено: $ReportPath" -Level "DEBUG"
         return $true
     } catch {
         Write-Log "Помилка створення JSON-звiту: $($_.Exception.Message)" -Level "ERROR"
@@ -3477,6 +3477,21 @@ function Main {
     
     $results = @{}
     
+    # Перевiрка вiльного мiсця перед архiвацiєю
+    $diskHealthWarningGB = [int](Get-ArchivConfigValue -Name "diskHealthWarningGB" -DefaultValue 20)
+    $diskHealthCriticalGB = [int](Get-ArchivConfigValue -Name "diskHealthCriticalGB" -DefaultValue 10)
+    $diskHealth = Get-ArchivDiskHealthSummary -Path $archivPath -WarningGB $diskHealthWarningGB -CriticalGB $diskHealthCriticalGB
+    Write-Log "=== ПЕРЕВIРКА ВIЛЬНОГО МIСЦЯ ==="
+    if ($diskHealth.status -eq "critical") {
+        Write-Log $diskHealth.message -Level "ERROR"
+    } elseif ($diskHealth.status -eq "warning") {
+        Write-Log $diskHealth.message -Level "WARNING"
+    } elseif ($diskHealth.status -eq "unknown") {
+        Write-Log $diskHealth.message -Level "WARNING"
+    } else {
+        Write-Log $diskHealth.message -Level "SUCCESS"
+    }
+    Write-Log "==="
     Write-Log "=== АРХIВАЦIЯ ТА СТВОРЕННЯ ХЕШУ ==="
     $effectiveFreeSpaceReserveGB = if ($null -ne $freeSpaceReserveGB -and "$freeSpaceReserveGB" -ne "") { $freeSpaceReserveGB } elseif ($null -ne $archiveMinFreeSpaceGB -and "$archiveMinFreeSpaceGB" -ne "") { $archiveMinFreeSpaceGB } else { 0 }
     Write-Log "Параметри перевiрки мiсця: резерв=$effectiveFreeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
@@ -3643,7 +3658,7 @@ function Main {
     } else {
         Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ===" -LogOnly
         Write-Log "Завантаження на SFTP вимкнено в налаштуваннях" -Level "INFO" -LogOnly
-        Write-Log "===" -LogOnly
+        Write-Log "==="-LogOnly
     }
     
     if ($global:DryRun -and $enableNetworkCopy) {
@@ -3708,7 +3723,7 @@ function Main {
     } else {
         Write-Log "=== КОПIЮВАННЯ В МЕРЕЖЕВУ ПАПКУ ===" -LogOnly
         Write-Log "Копiювання в мережеву папку вимкнено в налаштуваннях" -Level "INFO" -LogOnly
-        Write-Log "===" -LogOnly
+        Write-Log "==="-LogOnly
     }
     
     Set-ArchivWindowTitle -Stage "Синхронiзацiя BAZA"
@@ -3800,7 +3815,7 @@ function Main {
     } else {
         Write-Log "=== RETENTION АРХIВIВ ===" -LogOnly
         Write-Log "Retention архiвiв вимкнено в налаштуваннях" -Level "INFO" -LogOnly
-        Write-Log "===" -LogOnly
+        Write-Log "==="-LogOnly
         $retentionStats += [PSCustomObject]@{
             enabled = $false
             status = "disabled"
@@ -3824,6 +3839,8 @@ function Main {
     $duration = $scriptEndTime - $scriptStartTime
     
     Set-ArchivWindowTitle -Stage "Завершено"
+
+    Write-Log "=== ПІДСУМОК ВИКОНАННЯ ===" -NoTimestamp
 
     Write-Log "Час початку: $($scriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
     Write-Log "Час завершення: $($scriptEndTime.ToString('yyyy-MM-dd HH:mm:ss'))" -NoTimestamp
@@ -3905,27 +3922,6 @@ function Main {
     } else {
         Write-Log "Мережева синхронiзацiя BAZA: вимкнено" -Level "DEBUG" -LogOnly
     }
-    
-    Write-Log "" -NoTimestamp
-    # Перевiрка вiльного мiсця наприкiнцi роботи
-    $diskHealthWarningGB = [int](Get-ArchivConfigValue -Name "diskHealthWarningGB" -DefaultValue 20)
-    $diskHealthCriticalGB = [int](Get-ArchivConfigValue -Name "diskHealthCriticalGB" -DefaultValue 10)
-    $diskHealth = Get-ArchivDiskHealthSummary -Path $archivPath -WarningGB $diskHealthWarningGB -CriticalGB $diskHealthCriticalGB
-
-    Write-Log "==="
-
-    Write-Log "=== ПЕРЕВIРКА ВIЛЬНОГО МIСЦЯ ==="
-    if ($diskHealth.status -eq "critical") {
-        Write-Log $diskHealth.message -Level "ERROR"
-    } elseif ($diskHealth.status -eq "warning") {
-        Write-Log $diskHealth.message -Level "WARNING"
-    } elseif ($diskHealth.status -eq "unknown") {
-        Write-Log $diskHealth.message -Level "WARNING"
-    } else {
-        Write-Log $diskHealth.message -Level "SUCCESS"
-    }
-    Write-Log "==="
-
     $notificationPlan = Write-ArchivNotificationPlan -Results $results -DiskHealth $diskHealth -RetentionStats $retentionStats
     New-ArchivJsonReport `
         -StartedAt $scriptStartTime `
@@ -3936,10 +3932,10 @@ function Main {
         -DiskHealth $diskHealth `
         -NotificationPlan $notificationPlan `
         -ReportPath $global:jsonReportFile | Out-Null
-
-    
     Update-ArchivHistory -ReportPath $global:jsonReportFile | Out-Null
     Test-ArchivBackupHealth
+    Write-Log "" -NoTimestamp
+    Write-Log "==="
     Write-Log "=== ЗАВЕРШЕННЯ РОБОТИ СКРИПТА ===" -NoTimestamp
     Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Лог-файл: $logFile" -NoTimestamp
@@ -4038,4 +4034,8 @@ if ($args.Count -gt 0) {
 
 # Запуск головної функції (якщо не було параметрів)
 Main
+
+
+
+
 
