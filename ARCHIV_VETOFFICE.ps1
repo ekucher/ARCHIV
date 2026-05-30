@@ -2332,6 +2332,45 @@ function ConvertTo-ArchivBool {
     $text = ([string]$Value).Trim()
     return ($text -match '^(true|1|yes|y|так)$')
 }
+function Format-ArchivAgeText {
+    param([TimeSpan]$Age)
+
+    if ($Age.TotalMinutes -lt 1) {
+        return "щойно"
+    }
+
+    if ($Age.TotalHours -lt 1) {
+        $minutes = [math]::Max(1, [int][math]::Round($Age.TotalMinutes))
+        return "$minutes хв тому"
+    }
+
+    if ($Age.TotalDays -lt 1) {
+        $hours = [int][math]::Floor($Age.TotalHours)
+        $minutes = [int]($Age.Minutes)
+
+        if ($minutes -gt 0) {
+            return "$hours год $minutes хв тому"
+        }
+
+        return "$hours год тому"
+    }
+
+    $days = [int][math]::Floor($Age.TotalDays)
+    return "$days дн. тому"
+}
+
+function Get-ArchivCompressionSavedPercent {
+    param(
+        [Nullable[Int64]]$SourceBytes,
+        [Nullable[Int64]]$ArchiveBytes
+    )
+
+    if ($null -eq $SourceBytes -or $null -eq $ArchiveBytes -or $SourceBytes -le 0) {
+        return $null
+    }
+
+    return [math]::Round((1 - ($ArchiveBytes / $SourceBytes)) * 100, 1)
+}
 function Test-ArchivBackupHealth {
     param(
         [string]$HistoryPath = "",
@@ -2385,14 +2424,28 @@ function Test-ArchivBackupHealth {
         $lastSuccess = $successfulRealRuns | Select-Object -First 1
         $lastSuccessDate = [datetime]::Parse($lastSuccess.started_at)
         $age = (Get-Date) - $lastSuccessDate
-        $ageDays = [math]::Round($age.TotalDays, 2)
+        $ageText = Format-ArchivAgeText -Age $age
+        $lastSuccessText = $lastSuccessDate.ToString("yyyy-MM-dd HH:mm:ss")
 
-        Write-Log "Останнiй успiшний архiв: $($lastSuccess.started_at), $ageDays дн. тому" -NoTimestamp
+        Write-Log "Останнiй успiшний архiв: $lastSuccessText ($ageText)" -NoTimestamp
         Write-Log "Архiвiв у запуску: $($lastSuccess.archives_success) з $($lastSuccess.archives_count)" -NoTimestamp
-        Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -NoTimestamp
 
-        if ($lastSuccess.total_archive_size_text) {
-            Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -NoTimestamp
+        if ($lastSuccess.total_source_size_text -and $lastSuccess.total_archive_size_text) {
+            $savedPercent = Get-ArchivCompressionSavedPercent `
+                -SourceBytes ([int64]$lastSuccess.total_source_size_bytes) `
+                -ArchiveBytes ([int64]$lastSuccess.total_archive_size_bytes)
+
+            if ($null -ne $savedPercent) {
+                Write-Log "Стиснення: $($lastSuccess.total_source_size_text) -> $($lastSuccess.total_archive_size_text) ($savedPercent%)" -NoTimestamp
+            } else {
+                Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -NoTimestamp
+                Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -NoTimestamp
+            }
+        } else {
+            Write-Log "Загальний розмiр джерел: $($lastSuccess.total_source_size_text)" -NoTimestamp
+            if ($lastSuccess.total_archive_size_text) {
+                Write-Log "Загальний розмiр архiвiв: $($lastSuccess.total_archive_size_text)" -NoTimestamp
+            }
         }
 
         if ($age.TotalDays -ge $CriticalDays) {
@@ -3126,3 +3179,4 @@ if ($args.Count -gt 0) {
 
 # Запуск головної функції (якщо не було параметрів)
 Main
+
