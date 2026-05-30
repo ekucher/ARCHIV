@@ -434,7 +434,6 @@ function Remove-FromTaskScheduler {
 # ДОПОМІЖНІ ФУНКЦІЇ
 # =============================================
 
-
 # >>> PROCESS KILL-ON-CLOSE PATCH: BEGIN
 # Windows Job Object: kills assigned child processes when this PowerShell process closes.
 # This is needed because 7za.exe / WinSCP.com / robocopy.exe can otherwise continue after closing PowerShell.
@@ -896,7 +895,6 @@ function Remove-OldFiles {
         return $false
     }
 }
-
 
 function Invoke-ArchivArchiveRetention {
     param(
@@ -1579,7 +1577,6 @@ function Resolve-ArchivSftpUrl {
 # ФУНКЦІЇ АРХІВАЦІЇ
 # =============================================
 
-
 function Get-PathSizeBytes {
     param(
         [Parameter(Mandatory=$true)]
@@ -1680,6 +1677,58 @@ function Test-FreeSpaceForArchive {
     return $true
 }
 
+function Get-Archiv7ZipVersionText {
+    param(
+        [string]$ArcPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ArcPath) -or -not (Test-Path -LiteralPath $ArcPath)) {
+        return "невiдомо"
+    }
+
+    try {
+        $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($ArcPath)
+        if (-not [string]::IsNullOrWhiteSpace($fileVersion.ProductVersion)) {
+            return $fileVersion.ProductVersion
+        }
+        if (-not [string]::IsNullOrWhiteSpace($fileVersion.FileVersion)) {
+            return $fileVersion.FileVersion
+        }
+    } catch {
+    }
+
+    try {
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $ArcPath
+        $processInfo.Arguments = ""
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        $process.Start() | Out-Null
+
+        if (-not $process.WaitForExit(3000)) {
+            try { $process.Kill() } catch {}
+            return "невiдомо"
+        }
+
+        $output = $process.StandardOutput.ReadToEnd()
+        if ([string]::IsNullOrWhiteSpace($output)) {
+            $output = $process.StandardError.ReadToEnd()
+        }
+
+        $firstLine = (($output -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+        if ($firstLine -match '7-Zip.*?([0-9]+(?:\.[0-9]+)+)') {
+            return $Matches[1]
+        }
+    } catch {
+    }
+
+    return "невiдомо"
+}
 function Test-ArchiveIntegrity {
     param(
         [Parameter(Mandatory=$true)]
@@ -2115,7 +2164,6 @@ function New-SHA512Hash {
     }
 }
 
-
 function Test-SHA512Hash {
     param(
         [Parameter(Mandatory=$true)]
@@ -2207,7 +2255,6 @@ function Protect-ArchivSftpLogText {
     return $safe.Trim()
 }
 
-
 function Resolve-ArchivWinSCPPath {
     param(
         [string]$ConfiguredPath = ""
@@ -2291,7 +2338,6 @@ function Test-NetworkConnection {
         return $false
     }
 }
-
 
 function Resolve-ArchivSftpOpenUrl {
     param(
@@ -3395,6 +3441,7 @@ function Main {
     Write-Log "Файл конфiгурацiї: $configPath" -Level "INFO"
     Write-Log "==="
     
+    $archive7ZipVersionText = Get-Archiv7ZipVersionText -ArcPath $arcPath
     $safeArchiveParams = $archiveParams
     if (-not [string]::IsNullOrWhiteSpace($safeArchiveParams)) {
         $safeArchiveParams = [regex]::Replace($safeArchiveParams, '-p("[^"]*"|\S+)', '-p*****')
@@ -3407,7 +3454,7 @@ function Main {
     Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Iсторiя запускiв: $(Join-Path $logPath 'history.json')" -NoTimestamp
     Write-Log "DRY-RUN: $(if ($global:DryRun) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
-    Write-Log "Параметри для 7-Zip: $safeArchiveParams" -NoTimestamp
+    Write-Log "7-Zip: $archive7ZipVersionText | Параметри: $safeArchiveParams" -NoTimestamp
     Write-Log "Перевiрка архiвiв 7-Zip: $(if ($enableArchiveIntegrityTest) {'УВIМКНЕНО'} else {'ВИМКНЕНО'})" -NoTimestamp
     if ($enableNetworkCopy) { Write-Log "Копiювання в мережу: УВIМКНЕНО" -NoTimestamp } else { Write-Log "Копiювання в мережу: ВИМКНЕНО" -Level "DEBUG" -LogOnly }
     if (-not $excludeComponents.BAZA_Network) { Write-Log "Синхронiзацiя BAZA в мережу: УВIМКНЕНО" -NoTimestamp } else { Write-Log "Синхронiзацiя BAZA в мережу: ВИМКНЕНО" -Level "DEBUG" -LogOnly }
@@ -3478,10 +3525,12 @@ function Main {
     $results = @{}
     
     # Перевiрка вiльного мiсця перед архiвацiєю
+    $effectiveFreeSpaceReserveGB = if ($null -ne $freeSpaceReserveGB -and "$freeSpaceReserveGB" -ne "") { $freeSpaceReserveGB } elseif ($null -ne $archiveMinFreeSpaceGB -and "$archiveMinFreeSpaceGB" -ne "") { $archiveMinFreeSpaceGB } else { 0 }
     $diskHealthWarningGB = [int](Get-ArchivConfigValue -Name "diskHealthWarningGB" -DefaultValue 20)
     $diskHealthCriticalGB = [int](Get-ArchivConfigValue -Name "diskHealthCriticalGB" -DefaultValue 10)
     $diskHealth = Get-ArchivDiskHealthSummary -Path $archivPath -WarningGB $diskHealthWarningGB -CriticalGB $diskHealthCriticalGB
     Write-Log "=== ПЕРЕВIРКА ВIЛЬНОГО МIСЦЯ ==="
+    Write-Log "Параметри перевiрки мiсця: резерв=$effectiveFreeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
     if ($diskHealth.status -eq "critical") {
         Write-Log $diskHealth.message -Level "ERROR"
     } elseif ($diskHealth.status -eq "warning") {
@@ -3493,8 +3542,7 @@ function Main {
     }
     Write-Log "==="
     Write-Log "=== АРХIВАЦIЯ ТА СТВОРЕННЯ ХЕШУ ==="
-    $effectiveFreeSpaceReserveGB = if ($null -ne $freeSpaceReserveGB -and "$freeSpaceReserveGB" -ne "") { $freeSpaceReserveGB } elseif ($null -ne $archiveMinFreeSpaceGB -and "$archiveMinFreeSpaceGB" -ne "") { $archiveMinFreeSpaceGB } else { 0 }
-    Write-Log "Параметри перевiрки мiсця: резерв=$effectiveFreeSpaceReserveGB GB; множник=$archiveSpaceMultiplier" -Level "INFO"
+
     foreach ($archive in $archives) {
         Set-ArchivWindowTitle -Stage "Архiвацiя $($archive.Type)"
         Write-Log "" -NoTimestamp
@@ -4035,8 +4083,4 @@ if ($args.Count -gt 0) {
 
 # Запуск головної функції (якщо не було параметрів)
 Main
-
-
-
-
 
