@@ -1988,6 +1988,86 @@ function Test-SHA512Hash {
 }
 
 # =============================================
+
+function Protect-ArchivSftpLogText {
+    param(
+        [AllowNull()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $safe = $Text
+
+    try {
+        $passwordValue = Get-ArchivSftpPassword
+        if (-not [string]::IsNullOrWhiteSpace($passwordValue)) {
+            $safe = $safe.Replace($passwordValue, "*****")
+            $encodedPassword = [uri]::EscapeDataString($passwordValue)
+            if (-not [string]::IsNullOrWhiteSpace($encodedPassword)) {
+                $safe = $safe.Replace($encodedPassword, "*****")
+            }
+        }
+    } catch {
+        # Якщо Credential Manager недоступний, все одно застосуємо regex-маскування нижче.
+    }
+
+    # Маскуємо пароль у URL формату sftp://user:password@host/
+    $safe = [regex]::Replace($safe, '(sftp://[^:\s/]+:)[^@\s]+(@)', '${1}*****${2}')
+
+    # Маскуємо можливі параметри password=...
+    $safe = [regex]::Replace($safe, '(?i)(password\s*[=:]\s*)\S+', '${1}*****')
+
+    return $safe.Trim()
+}
+
+
+function Resolve-ArchivWinSCPPath {
+    param(
+        [string]$ConfiguredPath = ""
+    )
+
+    $candidates = @()
+
+    if (-not [string]::IsNullOrWhiteSpace($ConfiguredPath)) {
+        $candidates += $ConfiguredPath
+    }
+
+    # Portable WinSCP біля скрипта: .\Tools\WinSCP.com
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+            $candidates += (Join-Path $PSScriptRoot "Tools\WinSCP.com")
+        } elseif (-not [string]::IsNullOrWhiteSpace($scriptPath)) {
+            $candidates += (Join-Path $scriptPath "Tools\WinSCP.com")
+        }
+    } catch {}
+
+    # WinSCP у PATH
+    try {
+        $cmd = Get-Command "WinSCP.com" -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) {
+            $candidates += $cmd.Source
+        }
+    } catch {}
+
+    # Стандартні шляхи встановлення
+    $candidates += "C:\Program Files\WinSCP\WinSCP.com"
+    $candidates += "C:\Program Files (x86)\WinSCP\WinSCP.com"
+
+    foreach ($candidate in ($candidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        try {
+            $expanded = [Environment]::ExpandEnvironmentVariables($candidate)
+            if (Test-Path -LiteralPath $expanded) {
+                return (Resolve-Path -LiteralPath $expanded).Path
+            }
+        } catch {}
+    }
+
+    return $null
+}
+
 # ФУНКЦІЇ МЕРЕЖІ ТА SFTP
 # =============================================
 
@@ -1997,6 +2077,13 @@ function Test-SFTPConfig {
         return $false
     }
     
+    $resolvedWinSCPPath = Resolve-ArchivWinSCPPath -ConfiguredPath (Get-ArchivConfigValue -Name "winSCPPath" -DefaultValue "")
+    if ([string]::IsNullOrWhiteSpace($resolvedWinSCPPath)) {
+        Write-Log "WinSCP.com не знайдено. Очікувано: .\Tools\WinSCP.com або встановлений WinSCP у системі" -Level "ERROR"
+        return $false
+    }
+
+    Write-Log "WinSCP.com: $resolvedWinSCPPath" -Level "INFO" -LogOnly
     Write-Log "SFTP конфiгурацiя перевiрена успiшно" -Level "SUCCESS"
     return $true
 }
@@ -2021,6 +2108,78 @@ function Test-NetworkConnection {
     }
 }
 
+
+function Resolve-ArchivSftpOpenUrl {
+    param(
+        [string]$RepositorySFTPUrl
+    )
+
+    $loginValue = Get-ArchivConfigValue -Name "Login" -DefaultValue ""
+    if ([string]::IsNullOrWhiteSpace($loginValue)) {
+        return $RepositorySFTPUrl
+    }
+
+    $hostValue = ""
+
+    # Надійно беремо host після ОСТАННЬОГО "@", бо пароль може містити "/", "[", "]", "}" тощо.
+    try {
+        $atIndex = $RepositorySFTPUrl.LastIndexOf("@")
+        if ($atIndex -ge 0 -and $atIndex -lt ($RepositorySFTPUrl.Length - 1)) {
+            $hostPart = $RepositorySFTPUrl.Substring($atIndex + 1)
+
+            $slashIndex = $hostPart.IndexOf("/")
+            if ($slashIndex -ge 0) {
+                $hostPart = $hostPart.Substring(0, $slashIndex)
+            }
+
+            $colonIndex = $hostPart.IndexOf(":")
+            if ($colonIndex -ge 0) {
+                $hostPart = $hostPart.Substring(0, $colonIndex)
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($hostPart)) {
+                $hostValue = $hostPart
+            }
+        }
+    } catch {}
+
+    # Якщо URL без userinfo або попередній парсинг дав login замість host — пробуємо Uri.
+    if ([string]::IsNullOrWhiteSpace($hostValue) -or $hostValue -eq $loginValue) {
+        try {
+            $uri = [Uri]$RepositorySFTPUrl
+            if (-not [string]::IsNullOrWhiteSpace($uri.Host) -and $uri.Host -ne $loginValue) {
+                $hostValue = $uri.Host
+            }
+        } catch {}
+    }
+
+    # StorageBox fallback.
+    if ([string]::IsNullOrWhiteSpace($hostValue) -or $hostValue -eq $loginValue) {
+        $hostValue = "$loginValue.your-storagebox.de"
+    }
+
+    $encodedLogin = [Uri]::EscapeDataString($loginValue)
+    return "sftp://$($encodedLogin)@$($hostValue)/"
+}
+
+function New-ArchivWinSCPOpenCommand {
+    param(
+        [string]$RepositorySFTPUrl,
+        [string]$HostKey,
+        [int]$TimeoutSeconds = 30
+    )
+
+    $openUrl = Resolve-ArchivSftpOpenUrl -RepositorySFTPUrl $RepositorySFTPUrl
+    $passwordValue = Get-ArchivSftpPassword
+
+    if ([string]::IsNullOrWhiteSpace($passwordValue)) {
+        return "open `"$openUrl`" -hostkey=$HostKey -timeout=$TimeoutSeconds -rawsettings TryAgent=0"
+    }
+
+    # Пароль передається окремо, щоб символи /, [, ], }, ° не ламали URL.
+    return "open `"$openUrl`" -password=`"$passwordValue`" -hostkey=$HostKey -timeout=$TimeoutSeconds -rawsettings TryAgent=0"
+}
+
 function Test-SFTPConnection {
     param(
         [string]$WinSCPPath,
@@ -2035,8 +2194,10 @@ function Test-SFTPConnection {
         return $false
     }
     
+    $openCommand = New-ArchivWinSCPOpenCommand -RepositorySFTPUrl $RepositorySFTPUrl -HostKey $HostKey -TimeoutSeconds 30
+
     $testCommand = @"
-open $RepositorySFTPUrl -hostkey=$HostKey -timeout=30
+$openCommand
 ls
 exit
 "@
@@ -2062,10 +2223,21 @@ exit
         $process.WaitForExit()
         
         if ($process.ExitCode -eq 0) {
-            Write-Log "Пiдключення до SFTP сервера успiшне" -Level "SUCCESS" -LogOnly
+            Write-Log "Пiдключення до SFTP сервера успiшне" -Level "SUCCESS"
             return $true
         } else {
-            Write-Log "Помилка пiдключення до SFTP сервера (код: $($process.ExitCode))" -Level "ERROR" -LogOnly
+            Write-Log "Помилка пiдключення до SFTP сервера (код: $($process.ExitCode))" -Level "ERROR"
+
+            $safeErrorOutput = Protect-ArchivSftpLogText -Text $errorOutput
+            $safeOutput = Protect-ArchivSftpLogText -Text $output
+
+            if (-not [string]::IsNullOrWhiteSpace($safeErrorOutput)) {
+                Write-Log "WinSCP stderr: $safeErrorOutput" -Level "ERROR"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($safeOutput)) {
+                Write-Log "WinSCP stdout: $safeOutput" -Level "ERROR"
+            }
             return $false
         }
 
@@ -2098,8 +2270,13 @@ function Send-FileViaWinSCP {
     }
     
     # Створюємо тимчасовий скрипт для WinSCP
+    $openCommand = New-ArchivWinSCPOpenCommand -RepositorySFTPUrl $RepositorySFTPUrl -HostKey $HostKey -TimeoutSeconds 30
+
     $winscpCommand = @"
-open $RepositorySFTPUrl -hostkey=$HostKey
+$openCommand
+option batch continue
+mkdir /$RemoteDirectory
+option batch abort
 cd /$RemoteDirectory
 put "$LocalFilePath"
 exit
@@ -2130,6 +2307,17 @@ exit
             return $true
         } else {
             Write-Log "Помилка завантаження (код: $($process.ExitCode)): $(Split-Path $LocalFilePath -Leaf)" -Level "ERROR"
+
+            $safeErrorOutput = Protect-ArchivSftpLogText -Text $errorOutput
+            $safeOutput = Protect-ArchivSftpLogText -Text $output
+
+            if (-not [string]::IsNullOrWhiteSpace($safeErrorOutput)) {
+                Write-Log "WinSCP upload stderr: $safeErrorOutput" -Level "ERROR"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($safeOutput)) {
+                Write-Log "WinSCP upload stdout: $safeOutput" -Level "ERROR"
+            }
             return $false
         }
     } catch {
@@ -2977,7 +3165,12 @@ function New-ArchivJsonReport {
             archives                 = $archiveReports
             sftp                     = [PSCustomObject]@{
                 enabled = [bool]$enableSFTPUpload
-                status  = $sftpStatus
+                status  = if ($enableSFTPUpload -and -not $global:DryRun) { $sftpUploadStatus } else { $sftpStatus }
+                error   = $sftpUploadError
+                uploaded = [PSCustomObject]@{
+                    success = [int]$uploadSuccess
+                    total = [int]$uploadTotal
+                }
             }
             network_copy             = [PSCustomObject]@{
                 enabled = [bool]$enableNetworkCopy
@@ -3153,24 +3346,38 @@ function Main {
     
     Write-Log "==="
     
+    $sftpUploadStatus = "disabled"
+    $sftpUploadError = ""
+    $sftpConnectionOk = $false
+
     if ($global:DryRun -and $enableSFTPUpload) {
         Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ==="
         Write-Log "DRY-RUN: завантаження на SFTP пропущено" -Level "WARNING"
         Write-Log "==="
     }
+    $script:sftpUploadStatus = "disabled"
+    $script:sftpUploadError = ""
+    $script:sftpUploadSuccess = 0
+    $script:sftpUploadTotal = 0
+
     # Завантаження на SFTP
     Set-ArchivWindowTitle -Stage "SFTP"
     if ($enableSFTPUpload -and -not $global:DryRun) {
         Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ==="
         Write-Log "--- ПЕРЕВІРКА КОНФІГУРАЦІЇ SFTP ---"
         
+        $resolvedSftpUrl = Resolve-ArchivSftpUrl -RepositorySFTPUrl $sftpUrl
+        $resolvedWinSCPPath = Resolve-ArchivWinSCPPath -ConfiguredPath (Get-ArchivConfigValue -Name "winSCPPath" -DefaultValue $winSCPPath)
+
         # Перевірка конфігурації SFTP
         if (-not (Test-SFTPConfig)) {
-            Write-Log "SFTP конфiгурацiя невiрна - пропускаємо завантаження" -Level "ERROR"
+            $script:sftpUploadStatus = "config_failed"; $script:sftpUploadError = "SFTP конфiгурацiя невiрна"; Write-Log "SFTP конфiгурацiя невiрна - пропускаємо завантаження" -Level "ERROR"
+        } elseif ([string]::IsNullOrWhiteSpace($resolvedWinSCPPath)) {
+            $script:sftpUploadStatus = "winscp_not_found"; $script:sftpUploadError = "WinSCP.com не знайдено"; Write-Log "WinSCP.com не знайдено - пропускаємо завантаження" -Level "ERROR"
         } elseif (-not (Test-NetworkConnection)) {
-            Write-Log "Мережеве з'єднання недоступне - пропускаємо завантаження" -Level "ERROR"
-        } elseif (-not (Test-SFTPConnection -WinSCPPath $winSCPPath -RepositorySFTPUrl $sftpUrl -HostKey $sftpHostKey)) {
-            Write-Log "Помилка пiдключення до SFTP - пропускаємо завантаження" -Level "ERROR"
+            $script:sftpUploadStatus = "network_failed"; $script:sftpUploadError = "Мережеве з'єднання недоступне"; Write-Log "Мережеве з'єднання недоступне - пропускаємо завантаження" -Level "ERROR"
+        } elseif (-not (Test-SFTPConnection -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey)) {
+            $script:sftpUploadStatus = "connection_failed"; $script:sftpUploadError = "Помилка пiдключення до SFTP"; Write-Log "Помилка пiдключення до SFTP - пропускаємо завантаження" -Level "ERROR"
         } else {
             $uploadSuccess = 0
             $uploadTotal = 0
@@ -3180,11 +3387,11 @@ function Main {
                 $uploadTotal += 2
                 
                 Write-Log "--- ЗАВАНТАЖЕННЯ АРХІВУ VETOFFICE НА SFTP ---"
-                $archiveUpload = Send-FileViaWinSCP -WinSCPPath $winSCPPath -RepositorySFTPUrl $sftpUrl -HostKey $sftpHostKey -LocalFilePath $results["VETOFFICE"].ArchivePath -RemoteDirectory $sftpDirectories["Model"]
+                $archiveUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["VETOFFICE"].ArchivePath -RemoteDirectory $sftpDirectories["Model"]
                 if ($archiveUpload) { $uploadSuccess++ }
                 
                 Write-Log "--- ЗАВАНТАЖЕННЯ ХЕШУ АРХІВУ VETOFFICE НА SFTP ---"
-                $hashUpload = Send-FileViaWinSCP -WinSCPPath $winSCPPath -RepositorySFTPUrl $sftpUrl -HostKey $sftpHostKey -LocalFilePath $results["VETOFFICE"].HashPath -RemoteDirectory $sftpDirectories["Model"]
+                $hashUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["VETOFFICE"].HashPath -RemoteDirectory $sftpDirectories["Model"]
                 if ($hashUpload) { $uploadSuccess++ }
             }
             
@@ -3193,18 +3400,27 @@ function Main {
                 $uploadTotal += 2
                 
                 Write-Log "--- ЗАВАНТАЖЕННЯ АРХІВУ BLOG НА SFTP ---"
-                $archiveUpload = Send-FileViaWinSCP -WinSCPPath $winSCPPath -RepositorySFTPUrl $sftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].ArchivePath -RemoteDirectory $sftpDirectories["BLOG"]
+                $archiveUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].ArchivePath -RemoteDirectory $sftpDirectories["BLOG"]
                 if ($archiveUpload) { $uploadSuccess++ }
                 
                 Write-Log "--- ЗАВАНТАЖЕННЯ ХЕШУ АРХІВУ BLOG НА SFTP ---"
-                $hashUpload = Send-FileViaWinSCP -WinSCPPath $winSCPPath -RepositorySFTPUrl $sftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].HashPath -RemoteDirectory $sftpDirectories["BLOG"]
+                $hashUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].HashPath -RemoteDirectory $sftpDirectories["BLOG"]
                 if ($hashUpload) { $uploadSuccess++ }
             }
             
             Write-Log "--- ПІДСУМОК ЗАВАНТАЖЕННЯ НА SFTP ---"
-            if ($uploadTotal -gt 0) {
+            $script:sftpUploadSuccess = [int]$uploadSuccess
+            $script:sftpUploadTotal = [int]$uploadTotal
+
+            if ($uploadTotal -gt 0 -and $uploadSuccess -eq $uploadTotal) {
+                $script:sftpUploadStatus = "success"
                 Write-Log "Завантажено $uploadSuccess з $uploadTotal файлiв на SFTP" -Level "SUCCESS"
+            } elseif ($uploadTotal -gt 0) {
+                $script:sftpUploadStatus = "upload_failed"
+                $script:sftpUploadError = "Завантажено $uploadSuccess з $uploadTotal файлiв"
+                Write-Log "Завантажено $uploadSuccess з $uploadTotal файлiв на SFTP" -Level "ERROR"
             } else {
+                $script:sftpUploadStatus = "no_files"
                 Write-Log "Немає файлiв для завантаження на SFTP" -Level "WARNING"
             }
         }
@@ -3405,19 +3621,9 @@ function Main {
     $totalArchives = $results.Count
     
     # Отримуємо статистику SFTP
-    $uploadSuccess = 0
-    $uploadTotal = 0
+    $uploadSuccess = [int]$script:sftpUploadSuccess
+    $uploadTotal = [int]$script:sftpUploadTotal
     Set-ArchivWindowTitle -Stage "SFTP"
-    if ($enableSFTPUpload -and -not $global:DryRun) {
-        if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess) {
-            $uploadTotal += 2
-            $uploadSuccess += 2
-        }
-        if ($results.ContainsKey("BLOG") -and $results["BLOG"].ArchiveSuccess -and $results["BLOG"].HashSuccess) {
-            $uploadTotal += 2
-            $uploadSuccess += 2
-        }
-    }
     
     # Отримуємо статистику мережевого копіювання
     $copySuccess = 0
@@ -3447,7 +3653,15 @@ function Main {
     
     Set-ArchivWindowTitle -Stage "SFTP"
     if ($enableSFTPUpload -and -not $global:DryRun) {
-        Write-Log "Завантаження на SFTP: $(if ($uploadSuccess -eq $uploadTotal -and $uploadTotal -gt 0) {'успiшно'} elseif ($uploadTotal -eq 0) {'немає файлів'} else {'$uploadSuccess з $uploadTotal'})" -NoTimestamp
+        if ($script:sftpUploadStatus -eq "success") {
+            Write-Log "Завантаження на SFTP: успiшно" -NoTimestamp
+        } elseif ($script:sftpUploadStatus -eq "partial") {
+            Write-Log "Завантаження на SFTP: частково ($uploadSuccess з $uploadTotal)" -Level "WARNING" -NoTimestamp
+        } elseif ($script:sftpUploadStatus -eq "no_files") {
+            Write-Log "Завантаження на SFTP: немає файлiв" -Level "WARNING" -NoTimestamp
+        } else {
+            Write-Log "Завантаження на SFTP: помилка ($script:sftpUploadStatus)" -Level "ERROR" -NoTimestamp
+        }
     } else {
         Write-Log "Завантаження на SFTP: вимкнено" -Level "DEBUG" -LogOnly
     }
