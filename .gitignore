@@ -77,3 +77,22 @@ Desktop.ini
 
 # Runtime archived Apache/Br-a-vo.web logs
 /Br-a-vo.web/
+
+# Local patch/debug files
+Fix-*.ps1
+Add-*.ps1
+Update-*Patch*.ps1
+*Patch.ps1
+*Patch_*.ps1
+
+# Local backup files created by patch scripts
+*.bak
+*_bak_*
+*.ps1.*_bak_*
+*.config.ps1.*_bak_*
+*.config.example.ps1.*_bak_*
+README.md.*_bak_*
+
+# Local SFTP/debug temporary files
+winscp*.log
+winscp*.txt
