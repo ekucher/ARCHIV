@@ -2534,7 +2534,15 @@ exit
         
         if ($process.ExitCode -eq 0) {
             Write-Log "Файл успiшно завантажено: $(Split-Path $LocalFilePath -Leaf)" -Level "SUCCESS"
-            return $true
+
+            $verifyUpload = Test-ArchivSftpUploadedFile `
+                -WinSCPPath $WinSCPPath `
+                -RepositorySFTPUrl $RepositorySFTPUrl `
+                -HostKey $HostKey `
+                -LocalFilePath $LocalFilePath `
+                -RemoteDirectory $RemoteDirectory
+
+            return [bool]$verifyUpload
         } else {
             Write-Log "Помилка завантаження (код: $($process.ExitCode)): $(Split-Path $LocalFilePath -Leaf)" -Level "ERROR"
 
@@ -2558,6 +2566,382 @@ exit
         if (Test-Path $tempScript) {
             Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
         }
+    }
+}
+
+
+function Invoke-ArchivWinSCPScript {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$WinSCPPath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ScriptText,
+
+        [string]$OperationName = "WinSCP"
+    )
+
+    $tempScript = [System.IO.Path]::GetTempFileName() + ".txt"
+
+    try {
+        $ScriptText | Out-File -FilePath $tempScript -Encoding ASCII -Force
+
+        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $processInfo.FileName = $WinSCPPath
+        $processInfo.Arguments = "/ini=nul /script=`"$tempScript`""
+        $processInfo.RedirectStandardOutput = $true
+        $processInfo.RedirectStandardError = $true
+        $processInfo.UseShellExecute = $false
+        $processInfo.CreateNoWindow = $true
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $processInfo
+        $process.Start() | Out-Null
+        Add-ProcessToArchivKillOnCloseJob -Process $process
+
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+
+        return [PSCustomObject]@{
+            Success = ($process.ExitCode -eq 0)
+            ExitCode = $process.ExitCode
+            StdOut = $stdout
+            StdErr = $stderr
+            SafeStdOut = (Protect-ArchivSftpLogText -Text $stdout)
+            SafeStdErr = (Protect-ArchivSftpLogText -Text $stderr)
+        }
+    } catch {
+        return [PSCustomObject]@{
+            Success = $false
+            ExitCode = -1
+            StdOut = ""
+            StdErr = $_.Exception.Message
+            SafeStdOut = ""
+            SafeStdErr = (Protect-ArchivSftpLogText -Text $_.Exception.Message)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tempScript) {
+            Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ArchivSftpRemoteFileSize {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$WinSCPPath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RepositorySFTPUrl,
+
+        [Parameter(Mandatory=$true)]
+        [string]$HostKey,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RemoteDirectory,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RemoteFileName
+    )
+
+    $openCommand = New-ArchivWinSCPOpenCommand -RepositorySFTPUrl $RepositorySFTPUrl -HostKey $HostKey -TimeoutSeconds 30
+
+    $scriptText = @"
+$openCommand
+option batch abort
+cd /$RemoteDirectory
+stat "$RemoteFileName"
+exit
+"@
+
+    $result = Invoke-ArchivWinSCPScript -WinSCPPath $WinSCPPath -ScriptText $scriptText -OperationName "SFTP stat"
+
+    if (-not $result.Success) {
+        Write-Log "SFTP Verify: не вдалося отримати розмiр файлу $RemoteDirectory/$RemoteFileName" -Level "ERROR"
+        if (-not [string]::IsNullOrWhiteSpace($result.SafeStdErr)) {
+            Write-Log "WinSCP stat stderr: $($result.SafeStdErr)" -Level "ERROR" -LogOnly
+        }
+        if (-not [string]::IsNullOrWhiteSpace($result.SafeStdOut)) {
+            Write-Log "WinSCP stat stdout: $($result.SafeStdOut)" -Level "ERROR" -LogOnly
+        }
+        return $null
+    }
+
+    $text = "$($result.StdOut)`n$($result.StdErr)"
+
+    $sizeMatch = [regex]::Match($text, '(?im)^\s*Size:\s*(\d+)\s*$')
+    if ($sizeMatch.Success) {
+        return [int64]$sizeMatch.Groups[1].Value
+    }
+
+    $escapedName = [regex]::Escape($RemoteFileName)
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line -match $escapedName) {
+            $columns = @($line -split '\s+' | Where-Object { $_ -ne "" })
+            foreach ($column in $columns) {
+                if ($column -match '^\d+$') {
+                    $candidate = [int64]$column
+                    if ($candidate -gt 0) {
+                        return $candidate
+                    }
+                }
+            }
+        }
+    }
+
+    Write-Log "SFTP Verify: не вдалося розпiзнати розмiр файлу $RemoteDirectory/$RemoteFileName" -Level "ERROR"
+    Write-Log "WinSCP stat output: $(Protect-ArchivSftpLogText -Text $text)" -Level "DEBUG"
+    return $null
+}
+
+function Test-ArchivSftpUploadedFile {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$WinSCPPath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RepositorySFTPUrl,
+
+        [Parameter(Mandatory=$true)]
+        [string]$HostKey,
+
+        [Parameter(Mandatory=$true)]
+        [string]$LocalFilePath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RemoteDirectory
+    )
+
+    $verifyEnabled = [bool](Get-ArchivConfigValue -Name "enableSftpUploadVerify" -DefaultValue $true)
+    if (-not $verifyEnabled) {
+        Write-Log "SFTP Verify вимкнено: $(Split-Path $LocalFilePath -Leaf)" -Level "DEBUG" -LogOnly
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $LocalFilePath)) {
+        Write-Log "SFTP Verify: локальний файл не знайдено: $LocalFilePath" -Level "ERROR"
+        return $false
+    }
+
+    $fileName = Split-Path $LocalFilePath -Leaf
+    $localSize = [int64](Get-Item -LiteralPath $LocalFilePath).Length
+
+    $remoteSize = Get-ArchivSftpRemoteFileSize `
+        -WinSCPPath $WinSCPPath `
+        -RepositorySFTPUrl $RepositorySFTPUrl `
+        -HostKey $HostKey `
+        -RemoteDirectory $RemoteDirectory `
+        -RemoteFileName $fileName
+
+    if ($null -eq $remoteSize) {
+        return $false
+    }
+
+    if ($remoteSize -eq $localSize) {
+        $sizeText = Convert-Size $localSize
+        Write-Log "SFTP Verify пройдено: $fileName ($sizeText)" -Level "SUCCESS"
+        return $true
+    }
+
+    Write-Log "SFTP Verify НЕ пройдено: ${fileName}; локально=$localSize байт; SFTP=$remoteSize байт" -Level "ERROR"
+    return $false
+}
+
+function Get-ArchivSftpRemoteArchiveEntries {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$WinSCPPath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RepositorySFTPUrl,
+
+        [Parameter(Mandatory=$true)]
+        [string]$HostKey,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RemoteDirectory
+    )
+
+    $openCommand = New-ArchivWinSCPOpenCommand -RepositorySFTPUrl $RepositorySFTPUrl -HostKey $HostKey -TimeoutSeconds 30
+
+    $scriptText = @"
+$openCommand
+option batch abort
+cd /$RemoteDirectory
+ls
+exit
+"@
+
+    $result = Invoke-ArchivWinSCPScript -WinSCPPath $WinSCPPath -ScriptText $scriptText -OperationName "SFTP ls"
+
+    if (-not $result.Success) {
+        Write-Log "SFTP Retention: не вдалося отримати список файлів каталогу /$RemoteDirectory" -Level "ERROR"
+        if (-not [string]::IsNullOrWhiteSpace($result.SafeStdErr)) {
+            Write-Log "WinSCP ls stderr: $($result.SafeStdErr)" -Level "ERROR" -LogOnly
+        }
+        return @()
+    }
+
+    $entries = @()
+
+    foreach ($line in ($result.StdOut -split "`r?`n")) {
+        $matches = [regex]::Matches($line, '(?<name>[^\s"''/\\]+\.mdz(?:\.sha512)?)')
+        foreach ($match in $matches) {
+            $name = $match.Groups["name"].Value
+            $baseName = if ($name.EndsWith(".sha512")) { $name.Substring(0, $name.Length - 7) } else { $name }
+
+            $dateMatch = [regex]::Match($baseName, '_(?<date>\d{8}_\d{4})\.mdz$')
+            if (-not $dateMatch.Success) {
+                continue
+            }
+
+            try {
+                $parsedDate = [datetime]::ParseExact($dateMatch.Groups["date"].Value, "yyyyMMdd_HHmm", [System.Globalization.CultureInfo]::InvariantCulture)
+            } catch {
+                continue
+            }
+
+            $entries += [PSCustomObject]@{
+                Name = $name
+                BaseName = $baseName
+                Timestamp = $parsedDate
+                IsHash = $name.EndsWith(".sha512")
+            }
+        }
+    }
+
+    return @($entries | Sort-Object Name -Unique)
+}
+
+function Invoke-ArchivSftpRetention {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$WinSCPPath,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RepositorySFTPUrl,
+
+        [Parameter(Mandatory=$true)]
+        [string]$HostKey,
+
+        [Parameter(Mandatory=$true)]
+        [string]$RemoteDirectory,
+
+        [int]$KeepCount = 31
+    )
+
+    $retentionEnabled = [bool](Get-ArchivConfigValue -Name "enableSftpRetention" -DefaultValue $false)
+    if (-not $retentionEnabled) {
+        Write-Log "SFTP Retention вимкнено для /${RemoteDirectory}" -Level "DEBUG" -LogOnly
+        return [PSCustomObject]@{
+            Enabled = $false
+            RemoteDirectory = $RemoteDirectory
+            ArchivesBefore = 0
+            Deleted = 0
+            Status = "disabled"
+        }
+    }
+
+    if ($KeepCount -lt 1) {
+        Write-Log "SFTP Retention: некоректний KeepCount=$KeepCount для /${RemoteDirectory}" -Level "WARNING"
+        return [PSCustomObject]@{
+            Enabled = $true
+            RemoteDirectory = $RemoteDirectory
+            ArchivesBefore = 0
+            Deleted = 0
+            Status = "invalid_keep_count"
+        }
+    }
+
+    $entries = @(Get-ArchivSftpRemoteArchiveEntries `
+        -WinSCPPath $WinSCPPath `
+        -RepositorySFTPUrl $RepositorySFTPUrl `
+        -HostKey $HostKey `
+        -RemoteDirectory $RemoteDirectory)
+
+    $groups = @(
+        $entries |
+            Group-Object BaseName |
+            ForEach-Object {
+                $archiveEntry = @($_.Group | Where-Object { -not $_.IsHash } | Select-Object -First 1)
+                if ($archiveEntry.Count -gt 0) {
+                    [PSCustomObject]@{
+                        BaseName = $_.Name
+                        Timestamp = $archiveEntry[0].Timestamp
+                        Files = @($_.Group.Name)
+                    }
+                }
+            } |
+            Sort-Object Timestamp -Descending
+    )
+
+    $archivesBefore = @($groups).Count
+
+    if ($archivesBefore -le $KeepCount) {
+        Write-Log "SFTP Retention /${RemoteDirectory}: архiвiв=$archivesBefore; лiмiт=$KeepCount; видалення не потрiбне" -Level "INFO"
+        return [PSCustomObject]@{
+            Enabled = $true
+            RemoteDirectory = $RemoteDirectory
+            ArchivesBefore = $archivesBefore
+            Deleted = 0
+            Status = "no_action"
+        }
+    }
+
+    $deleteGroups = @($groups | Select-Object -Skip $KeepCount)
+    $filesToDelete = @($deleteGroups | ForEach-Object { $_.Files } | Sort-Object -Unique)
+
+    if ($filesToDelete.Count -eq 0) {
+        Write-Log "SFTP Retention /${RemoteDirectory}: файлiв для видалення не знайдено" -Level "INFO"
+        return [PSCustomObject]@{
+            Enabled = $true
+            RemoteDirectory = $RemoteDirectory
+            ArchivesBefore = $archivesBefore
+            Deleted = 0
+            Status = "no_files"
+        }
+    }
+
+    $openCommand = New-ArchivWinSCPOpenCommand -RepositorySFTPUrl $RepositorySFTPUrl -HostKey $HostKey -TimeoutSeconds 30
+    $rmCommands = ($filesToDelete | ForEach-Object { "rm `"$($_)`"" }) -join "`r`n"
+
+    $scriptText = @"
+$openCommand
+option batch abort
+cd /$RemoteDirectory
+$rmCommands
+exit
+"@
+
+    $result = Invoke-ArchivWinSCPScript -WinSCPPath $WinSCPPath -ScriptText $scriptText -OperationName "SFTP retention"
+
+    if ($result.Success) {
+        Write-Log "SFTP Retention /${RemoteDirectory}: видалено файлiв: $($filesToDelete.Count)" -Level "SUCCESS"
+        foreach ($file in $filesToDelete) {
+            Write-Log "SFTP Retention видалено: /$RemoteDirectory/$file" -Level "DEBUG"
+        }
+
+        return [PSCustomObject]@{
+            Enabled = $true
+            RemoteDirectory = $RemoteDirectory
+            ArchivesBefore = $archivesBefore
+            Deleted = $filesToDelete.Count
+            Status = "deleted"
+        }
+    }
+
+    Write-Log "SFTP Retention /${RemoteDirectory}: помилка видалення файлiв" -Level "ERROR"
+    if (-not [string]::IsNullOrWhiteSpace($result.SafeStdErr)) {
+        Write-Log "WinSCP retention stderr: $($result.SafeStdErr)" -Level "ERROR" -LogOnly
+    }
+
+    return [PSCustomObject]@{
+        Enabled = $true
+        RemoteDirectory = $RemoteDirectory
+        ArchivesBefore = $archivesBefore
+        Deleted = 0
+        Status = "error"
     }
 }
 
@@ -3625,6 +4009,14 @@ function Main {
     $sftpConnectionOk = $false
 
     if ($global:DryRun -and $enableSFTPUpload) {
+        $enableSftpRetentionRuntime = [bool](Get-ArchivConfigValue -Name "enableSftpRetention" -DefaultValue $false)
+
+        if ($enableSftpRetentionRuntime) {
+            Write-Log "=== RETENTION НА SFTP ==="
+            Write-Log "DRY-RUN: retention на SFTP пропущено" -Level "WARNING"
+            Write-Log "==="
+        }
+
         Write-Log "=== ЗАВАНТАЖЕННЯ НА SFTP ==="
         Write-Log "DRY-RUN: завантаження на SFTP пропущено" -Level "WARNING"
         Write-Log "==="
@@ -3656,6 +4048,35 @@ function Main {
             $uploadSuccess = 0
             $uploadTotal = 0
             
+            $enableSftpRetentionRuntime = [bool](Get-ArchivConfigValue -Name "enableSftpRetention" -DefaultValue $false)
+            if ($enableSftpRetentionRuntime) {
+                Write-Log "=== RETENTION НА SFTP ==="
+
+                $sftpRetentionKeepCountRuntime = [int](Get-ArchivConfigValue -Name "sftpRetentionKeepCount" -DefaultValue (Get-ArchivConfigValue -Name "archiveRetentionKeepCount" -DefaultValue $archiveVersions))
+
+                $remoteRetentionDirectories = @()
+
+                if ($sftpDirectories.ContainsKey("Model") -and -not [string]::IsNullOrWhiteSpace($sftpDirectories["Model"])) {
+                    $remoteRetentionDirectories += [string]$sftpDirectories["Model"]
+                }
+
+                if ($sftpDirectories.ContainsKey("BLOG") -and -not [string]::IsNullOrWhiteSpace($sftpDirectories["BLOG"])) {
+                    $remoteRetentionDirectories += [string]$sftpDirectories["BLOG"]
+                } elseif ($sftpDirectories.ContainsKey("Blog") -and -not [string]::IsNullOrWhiteSpace($sftpDirectories["Blog"])) {
+                    $remoteRetentionDirectories += [string]$sftpDirectories["Blog"]
+                }
+
+                foreach ($remoteRetentionDirectory in ($remoteRetentionDirectories | Select-Object -Unique)) {
+                    Invoke-ArchivSftpRetention `
+                        -WinSCPPath $resolvedWinSCPPath `
+                        -RepositorySFTPUrl $resolvedSftpUrl `
+                        -HostKey $sftpHostKey `
+                        -RemoteDirectory $remoteRetentionDirectory `
+                        -KeepCount $sftpRetentionKeepCountRuntime | Out-Null
+                }
+
+                Write-Log "==="
+            }
             # Завантаження VETOFFICE
             if ($results.ContainsKey("VETOFFICE") -and $results["VETOFFICE"].ArchiveSuccess -and $results["VETOFFICE"].HashSuccess -and $results["VETOFFICE"].ArchiveValidationSuccess) {
                 $uploadTotal += 2
@@ -3684,9 +4105,7 @@ function Main {
                 Write-Log "--- ЗАВАНТАЖЕННЯ ХЕШУ АРХІВУ BLOG НА SFTP ---"
                 $hashUpload = Send-FileViaWinSCP -WinSCPPath $resolvedWinSCPPath -RepositorySFTPUrl $resolvedSftpUrl -HostKey $sftpHostKey -LocalFilePath $results["BLOG"].HashPath -RemoteDirectory $sftpDirectories["BLOG"]
                 if ($hashUpload) { $uploadSuccess++ }
-            }
-            
-            Write-Log "" -NoTimestamp
+            }            Write-Log "" -NoTimestamp
             Write-Log "--- ПІДСУМОК ЗАВАНТАЖЕННЯ НА SFTP ---"
             $script:sftpUploadSuccess = [int]$uploadSuccess
             $script:sftpUploadTotal = [int]$uploadTotal

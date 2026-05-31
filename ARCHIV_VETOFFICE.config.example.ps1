@@ -166,6 +166,18 @@ $global:archiveRetentionKeepDays = 0
 
 # Увімкнути завантаження архівів і .sha512 на SFTP.
 $global:enableSFTPUpload = $false
+# Перевіряти розмір файлу на SFTP після завантаження.
+# true  - після upload виконується stat і порівнюється розмір локального та віддаленого файлу
+# false - перевірка після upload не виконується
+$global:enableSftpUploadVerify = $true
+
+# Увімкнути retention на SFTP.
+# true  - старі архіви та .sha512 видаляються на SFTP
+# false - SFTP retention не виконується
+$global:enableSftpRetention = $false
+
+# Скільки останніх комплектів archive.mdz + archive.mdz.sha512 залишати на SFTP.
+$global:sftpRetentionKeepCount = 31
 
 # Логін SFTP.
 $global:Login = 'sftp_user'
