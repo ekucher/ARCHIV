@@ -419,6 +419,7 @@ $RestoreDayName = $RestoreDayOfWeek.ToString()
 $osVersion = [System.Environment]::OSVersion.Version
 if ($osVersion.Major -lt 6 -or ($osVersion.Major -eq 6 -and $osVersion.Minor -lt 3)) {
     Write-Host "ПОМИЛКА: Скрипт вимагає Windows 8.1/Windows Server 2012 R2 або новішої версії" -ForegroundColor Red
+    Release-BravoMaintenanceMutex
     exit 1
 }
 
@@ -478,6 +479,7 @@ if ((Split-Path -Leaf $scriptPath) -ne "ARCHIV") {
     $errorMessage = "ПОМИЛКА: Скрипт має запускатись лише з папки ARCHIV!"
     "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $errorMessage" | Out-File "$env:TEMP\lims_error.log" -Append
     Write-Host $errorMessage -ForegroundColor Red
+    Release-BravoMaintenanceMutex
     exit 1
 }
 
@@ -520,6 +522,7 @@ if (-not (Test-Path $LOG_DIR)) {
     }
     catch {
         Write-Host "Не вдалося створити директорію для логів $LOG_DIR : $($_.Exception.Message)" -ForegroundColor Red
+        Release-BravoMaintenanceMutex
         exit 1
     }
 }
