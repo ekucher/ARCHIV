@@ -308,6 +308,30 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 $script:BravoMaintenanceMutex = New-Object System.Threading.Mutex($false, "Global\BRAVO_MAINTENANCE")
 $script:BravoMaintenanceMutexAcquired = $false
 
+function Release-BravoMaintenanceMutex {
+    if (-not $script:BravoMaintenanceMutex) {
+        return
+    }
+
+    if ($script:BravoMaintenanceMutexAcquired) {
+        try {
+            $script:BravoMaintenanceMutex.ReleaseMutex()
+        }
+        catch {
+        }
+
+        $script:BravoMaintenanceMutexAcquired = $false
+    }
+
+    try {
+        $script:BravoMaintenanceMutex.Dispose()
+    }
+    catch {
+    }
+
+    $script:BravoMaintenanceMutex = $null
+}
+
 try {
     $script:BravoMaintenanceMutexAcquired = $script:BravoMaintenanceMutex.WaitOne(0)
 }
@@ -1448,4 +1472,5 @@ Write-Log -Message "==="
 
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
+Release-BravoMaintenanceMutex
 exit $exitCode
