@@ -18,6 +18,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Show repository diagnostics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Current location:"
+          Get-Location
+
+          Write-Host "Git HEAD:"
+          git rev-parse HEAD
+
+          Write-Host "Repository root files:"
+          Get-ChildItem -LiteralPath "." -Force | Sort-Object Name | Select-Object Mode,Length,Name
+
+          if (-not (Test-Path -LiteralPath ".\.git")) {
+              throw ".git directory not found after checkout."
+          }
+
+          if (-not (Test-Path -LiteralPath ".\Build-BRAVO-Monolith.ps1")) {
+              throw "Build-BRAVO-Monolith.ps1 not found in repository root: $(Get-Location)"
+          }
+
+          if (-not (Test-Path -LiteralPath ".\src\BRAVO.build.json")) {
+              throw "src\BRAVO.build.json not found in repository root: $(Get-Location)"
+          }
       - name: Show PowerShell version
         shell: powershell
         run: |
@@ -57,6 +82,10 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path -LiteralPath ".\Build-BRAVO-Monolith.ps1")) {
+              throw "Build-BRAVO-Monolith.ps1 not found in repository root: $(Get-Location)"
+          }
 
           powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
 
