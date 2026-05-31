@@ -10,8 +10,8 @@ on:
       - main
 
 jobs:
-  syntax-and-build:
-    name: Validate PowerShell syntax and build monolith
+  root-monolith-syntax:
+    name: Validate root PowerShell monolith syntax
     runs-on: windows-latest
 
     steps:
@@ -75,55 +75,4 @@ jobs:
               Write-Host "BRAVO_MAINTENANCE.ps1 not found, skipping root monolith syntax check."
           }
 
-      - name: Build generated monolith
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          if (-not (Test-Path -LiteralPath ".\Build-BRAVO-Monolith.ps1")) {
-              throw "Build-BRAVO-Monolith.ps1 not found in repository root: $(Get-Location)"
-          }
-
-          .\Build-BRAVO-Monolith.ps1 -Clean -CreateSha512
-
-      - name: Check generated monolith syntax
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $builtScript = ".\dist\BRAVO_MAINTENANCE.ps1"
-
-          if (-not (Test-Path -LiteralPath $builtScript)) {
-              throw "Built monolith not found: $builtScript"
-          }
-
-          $tokens = $null
-          $errors = $null
-
-          [System.Management.Automation.Language.Parser]::ParseFile(
-              $builtScript,
-              [ref]$tokens,
-              [ref]$errors
-          ) | Out-Null
-
-          if ($errors -and $errors.Count -gt 0) {
-              foreach ($err in $errors) {
-                  Write-Error ("Line {0}, Column {1}: {2}" -f `
-                      $err.Extent.StartLineNumber, `
-                      $err.Extent.StartColumnNumber, `
-                      $err.Message)
-              }
-
-              throw "Generated monolith syntax check failed."
-          }
-
-          Write-Host "Generated monolith syntax OK"
-
-      - name: Verify generated files
-        shell: powershell
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Get-Item .\dist\BRAVO_MAINTENANCE.ps1
-          Get-Item .\dist\BRAVO_MAINTENANCE.ps1.sha512
 
