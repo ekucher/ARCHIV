@@ -2739,7 +2739,7 @@ function Test-ArchivSftpUploadedFile {
     }
 
     if ($remoteSize -eq $localSize) {
-        $sizeText = Convert-Size $localSize
+        $sizeText = "$localSize байт"
         Write-Log "SFTP Verify пройдено: $fileName ($sizeText)" -Level "SUCCESS"
         return $true
     }
@@ -4626,4 +4626,5 @@ if ($args.Count -gt 0) {
 
 # Запуск головної функції (якщо не було параметрів)
 Main
+
 
