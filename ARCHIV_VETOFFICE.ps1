@@ -36,8 +36,8 @@ if (!$currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adminis
 # =============================================
 
 # Змінні версії
-$ScriptVersion = "2.5"
-$ScriptDate = "2026-05-30"
+$ScriptVersion = "2.6"
+$ScriptDate = "2026-05-31"
 
 # Шлях до файлу конфігурації
 $configPath = Join-Path $PSScriptRoot "ARCHIV_VETOFFICE.config.ps1"
@@ -3812,6 +3812,125 @@ function New-ArchivJsonReport {
     }
 }
 # <<< JSON REPORT PATCH: END
+
+function Convert-ArchivMatrixStatus {
+    param(
+        [AllowNull()]
+        [object]$Value,
+
+        [string]$WhenFalse = "FAIL"
+    )
+
+    if ($null -eq $Value) {
+        return "N/A"
+    }
+
+    try {
+        if ([bool]$Value) {
+            return "OK"
+        }
+    } catch {
+        return "N/A"
+    }
+
+    return $WhenFalse
+}
+
+function Get-ArchivSftpMatrixStatus {
+    param(
+        [string]$UploadStatus,
+        [int]$UploadSuccess = 0,
+        [int]$UploadTotal = 0
+    )
+
+    if (-not $enableSFTPUpload) {
+        return "OFF"
+    }
+
+    if ($global:DryRun) {
+        return "DRY"
+    }
+
+    if ($UploadTotal -le 0) {
+        return "N/A"
+    }
+
+    if ($UploadStatus -eq "success" -and $UploadSuccess -eq $UploadTotal) {
+        return "OK"
+    }
+
+    if ($UploadSuccess -gt 0 -and $UploadSuccess -lt $UploadTotal) {
+        return "PART"
+    }
+
+    return "FAIL"
+}
+
+function Write-ArchivSummaryMatrix {
+    param(
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Results,
+
+        [string]$SftpUploadStatus = "disabled",
+
+        [int]$SftpUploadSuccess = 0,
+
+        [int]$SftpUploadTotal = 0
+    )
+
+    $enableArchiveTestRestoreRuntime = [bool](Get-ArchivConfigValue -Name "enableArchiveTestRestore" -DefaultValue $false)
+    $sftpMatrixStatus = Get-ArchivSftpMatrixStatus -UploadStatus $SftpUploadStatus -UploadSuccess $SftpUploadSuccess -UploadTotal $SftpUploadTotal
+
+    Write-Log "" -NoTimestamp
+    Write-Log "==="
+    Write-Log "=== СТАТУС КОМПОНЕНТIВ ==="
+    Write-Log "" -NoTimestamp
+
+    Write-Log ("{0,-10} {1,-8} {2,-7} {3,-8} {4,-6} {5,-8} {6,-6} {7,-10}" -f `
+        "TYPE", "ARCHIVE", "SHA512", "VERIFY", "SIZE", "RESTORE", "SFTP", "VALIDATION") -NoTimestamp
+
+    Write-Log ("{0,-10} {1,-8} {2,-7} {3,-8} {4,-6} {5,-8} {6,-6} {7,-10}" -f `
+        "----------", "--------", "-------", "--------", "------", "--------", "------", "----------") -NoTimestamp
+
+    foreach ($name in ($Results.Keys | Sort-Object)) {
+        $item = $Results[$name]
+
+        if ($global:DryRun) {
+            $archiveStatus = "DRY"
+            $hashStatus = "DRY"
+            $verifyStatus = "DRY"
+            $sizeStatus = "DRY"
+            $validationStatus = "DRY"
+        } else {
+            $archiveStatus = Convert-ArchivMatrixStatus $item.ArchiveSuccess
+            $hashStatus = Convert-ArchivMatrixStatus $item.HashCreated
+            $verifyStatus = Convert-ArchivMatrixStatus $item.HashVerifySuccess
+            $sizeStatus = Convert-ArchivMatrixStatus $item.ArchiveSizePolicySuccess
+            $validationStatus = Convert-ArchivMatrixStatus $item.ArchiveValidationSuccess
+        }
+
+        $restoreStatus = if ($enableArchiveTestRestoreRuntime) {
+            if ($global:DryRun) { "DRY" } else { Convert-ArchivMatrixStatus $item.RestoreTestSuccess }
+        } else {
+            "OFF"
+        }
+
+        Write-Log ("{0,-10} {1,-8} {2,-7} {3,-8} {4,-6} {5,-8} {6,-6} {7,-10}" -f `
+            $name,
+            $archiveStatus,
+            $hashStatus,
+            $verifyStatus,
+            $sizeStatus,
+            $restoreStatus,
+            $sftpMatrixStatus,
+            $validationStatus
+        ) -NoTimestamp
+    }
+
+    Write-Log "" -NoTimestamp
+    Write-Log "Умовнi позначення: OK=успiшно; FAIL=помилка; OFF=вимкнено; DRY=DryRun; PART=частково; N/A=немає даних" -Level "DEBUG" -LogOnly
+    Write-Log "==="
+}
 function Main {
     Set-ArchivWindowTitle -Stage "Запуск скрипта"
     # Ініціалізація
@@ -4404,6 +4523,11 @@ function Main {
     Test-ArchivBackupHealth
     Write-Log "" -NoTimestamp
     Write-Log "==="
+    Write-ArchivSummaryMatrix `
+        -Results $results `
+        -SftpUploadStatus $script:sftpUploadStatus `
+        -SftpUploadSuccess ([int]$script:sftpUploadSuccess) `
+        -SftpUploadTotal ([int]$script:sftpUploadTotal)
     Write-Log "=== ЗАВЕРШЕННЯ РОБОТИ СКРИПТА ===" -NoTimestamp
     Write-Log "JSON-звiт: $global:jsonReportFile" -NoTimestamp
     Write-Log "Лог-файл: $logFile" -NoTimestamp
