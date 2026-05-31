@@ -710,6 +710,8 @@ $spaceCheckResult = Check-FreeSpace -ROOT_LIMS $ROOT_LIMS
 # Перевірка критичних помилок після перевірки місця
 if (-not $spaceCheckResult) {
     Write-Log -Message "Критична помилка перевірки місця. Завершення скрипта." -Level "ERROR"
+    Close-BravoProgressState -Status "CompletedWithErrors"
+    Release-BravoMaintenanceMutex
     exit 1
 }
 Complete-BravoProgressStep -StepId "CHECK_FREE_SPACE" -StepName "Перевірка вільного місця"
