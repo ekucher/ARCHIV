@@ -1,250 +1,243 @@
-﻿###########
+﻿##########
 # BravoSoft / VetOffice
 # ARCHIV_VETOFFICE.config.example.ps1
 #
-# Приклад конфігурації для ARCHIV_VETOFFICE.ps1
-#
-# Як використовувати:
-#   1. Скопіюйте цей файл у ARCHIV_VETOFFICE.config.ps1
-#   2. Відредагуйте шляхи, назву архіву та параметри
-#   3. Не комітьте реальний ARCHIV_VETOFFICE.config.ps1, якщо там є паролі
+# Конфігурація для ARCHIV_VETOFFICE.ps1
+# Версія конфігурації: 2.5.1
+# Це приклад конфігурації. Скопіюйте його в ARCHIV_VETOFFICE.config.ps1 і внесіть свої значення.
 ##########
 
 # =============================================
-# ОСНОВНІ ШЛЯХИ
+# 1. ОСНОВНІ НАЛАШТУВАННЯ
 # =============================================
 
-# Коренева папка VetOffice
-$rootPath = "E:\VetOffice"
+# Рівень логування:
+# DEBUG   - максимально детально
+# INFO    - стандартний режим
+# WARNING - тільки попередження та помилки
+# ERROR   - тільки помилки
+# SUCCESS - тільки успішні повідомлення
+$global:LogLevel = 'INFO'
 
-# Папка зі службовими утилітами
-# Очікуються:
-#   Tools\7za.exe
-#   Tools\WinSCP.com
-#   Tools\WinSCP.exe
-$toolsPath = Join-Path $PSScriptRoot "Tools"
-
-# Папка логів
-$logPath = Join-Path $PSScriptRoot "LOGS"
-
-# Коренева папка архівів
-$archivPath = $PSScriptRoot
+# Префікс імен архівів.
+$global:archivePrefix = 'vetcontrol_dev_pnmgu_v2508'
 
 # =============================================
-# ДЖЕРЕЛА ДАНИХ
+# 2. ШЛЯХИ
 # =============================================
 
-$sourcePaths = @{
-    # Основна папка VetOffice / Model
-    Model = Join-Path $rootPath "VETOFFICE"
+# Кореневий каталог VetOffice.
+$global:rootPath = 'E:\VetOffice'
 
-    # Папка BLOG, якщо використовується
-    Blog  = Join-Path $rootPath "BLOG"
+# Основний каталог архівів.
+$global:archivPath = Join-Path $global:rootPath 'ARCHIV'
+
+# Каталог інструментів: 7za.exe, WinSCP.com.
+$global:toolsPath = Join-Path $global:archivPath 'Tools'
+
+# Каталог логів, JSON-звітів і history.json.
+$global:logPath = Join-Path $global:archivPath 'LOGS'
+
+# Опційний прямий шлях до WinSCP.com.
+# Якщо порожньо, скрипт шукає WinSCP.com у Tools або в системі.
+$global:winSCPPath = ''
+
+# =============================================
+# 3. ДЖЕРЕЛА ТА КАТАЛОГИ АРХІВІВ
+# =============================================
+
+$global:sourcePaths = @{
+    # Вміст каталогу Model.
+    Model = Join-Path $global:rootPath "Model\*"
+
+    # Вміст каталогу BLOG.
+    Blog  = Join-Path $global:rootPath "BLOG\*"
 }
 
-# =============================================
-# ПАПКИ ПРИЗНАЧЕННЯ ДЛЯ АРХІВІВ
-# =============================================
+$global:archiveDirs = @{
+    # Локальний каталог архівів VETOFFICE / Model.
+    Model = Join-Path $global:archivPath "VETOFFICE"
 
-$archiveDirs = @{
-    # Архіви основної бази / Model / VetOffice
-    Model = Join-Path $archivPath "VETOFFICE"
-
-    # Архіви BLOG
-    Blog  = Join-Path $archivPath "BLOG"
+    # Локальний каталог архівів BLOG.
+    Blog  = Join-Path $global:archivPath "BLOG"
 }
 
-# =============================================
-# НАЗВИ ТА ПАРАМЕТРИ АРХІВАЦІЇ
-# =============================================
-
-# Префікс імені архівів.
-# Фінальне ім'я буде приблизно:
-#   vetcontrol_dev_pnmgu_v2508_20260529_2318.mdz
-#   vetcontrol_dev_pnmgu_v2508_blog_20260529_2318.mdz
-$archivePrefix = "vetcontrol_dev_pnmgu_v2508"
-
-# Параметри 7-Zip.
-# Рекомендовано залишити розширення .mdz у назві архіву, а формат архіву явно задати через -tzip або інший потрібний формат.
-#
-# Приклад ZIP-сумісного архіву:
-$archiveParams = "a -mmt -mx9 -r -y -ssw -scrcSHA512 -bb0 -aoa"
-
-# Пароль архiву з Windows Credential Manager.
-# Зберегти:
-#   cmdkey /generic:ARCHIV_VETOFFICE_ARCHIVE_PASSWORD /user:archive /pass:ВашПароль
-$enableArchivePassword = $true
-$archivePasswordCredentialTarget = "ARCHIV_VETOFFICE_ARCHIVE_PASSWORD"
-
-# Кількість останніх архівів / hash-файлів, які залишати при очищенні
-$archiveVersions = 7
-
-# =============================================
-# RETENTION АРХІВІВ
-# =============================================
-
-# Увімкнути очищення старих архівів.
-# true  - старі архіви та відповідні .sha512 будуть видалятися
-# false - архіви не видаляються
-# Комплект = archive.mdz + archive.mdz.sha512
-$archiveRetentionKeepCount = 31
-# 0 = не використовувати обмеження за віком, тільки кількість.
-$archiveRetentionKeepDays = 0
-$logRetentionDays = 31
-
-# Увімкнути видалення старих архівів
-$enableArchiveDeletion = $true
-# ПЕРЕВІРКА АРХІВІВ
-# =============================================
-
-# Перевірка архіву після створення через 7-Zip:
-#   7za.exe t archive.mdz -p*****
-#
-# Якщо архів захищено паролем, скрипт використовує той самий пароль,
-# що й для створення архіву.
-#
-# true  - перевіряти архів після створення
-# false - не перевіряти
-#
-# Рекомендація:
-#   Для щоденного бойового запуску можна встановити true.
-#   Якщо перевірка зависає або потрібно швидке тестування — залишити false.
-$enableArchiveIntegrityTest = $false
-
-# =============================================
-# ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ
-# =============================================
-
-# Мінімальний резерв вільного місця на диску архіву, GB
-$freeSpaceReserveGB = 5
-
-# Множник до розміру джерела.
-# Наприклад, якщо джерело 10 GB і множник 1.2, потрібно мінімум 12 GB.
-# Фактично використовується max($freeSpaceReserveGB, sourceSize * multiplier).
-$archiveSpaceMultiplier = 1.2
-
-# =============================================
-# КОМПОНЕНТИ, ЯКІ МОЖНА ВИМКНУТИ
-# =============================================
-
-$excludeComponents = @{
-    # Основна архівація VetOffice / Model
+# true  - компонент вимкнений
+# false - компонент увімкнений
+$global:excludeComponents = @{
     VETOFFICE    = $false
-
-    # Архівація BLOG
     Blog         = $false
-
-    # Локальна синхронізація BAZA
     BAZA         = $true
-
-    # Мережева синхронізація BAZA
     BAZA_Network = $true
 }
 
 # =============================================
-# BAZA / СИНХРОНІЗАЦІЯ
+# 4. 7-ZIP ТА ПАРАМЕТРИ АРХІВАЦІЇ
 # =============================================
 
-$bazaPaths = @{
-    Source              = Join-Path $rootPath "BAZA"
-    Destination_Local   = Join-Path $archivPath "BAZA"
-    Destination_Network = "\\SERVER\Backup\VetOffice\BAZA"
-}
+# Параметри створення архіву 7-Zip.
+# Типово:
+# a             - створити архів
+# -mmt          - багатопоточність
+# -mx5          - рівень стиснення 5
+# -r            - рекурсивно
+# -y            - автоматично Yes
+# -ssw          - архівувати відкриті файли
+# -scrcSHA512   - SHA512 для 7-Zip
+# -bb0          - мінімальний вивід 7-Zip
+# -aoa          - overwrite all при розпакуванні
+# -pPASSWORD    - пароль архіву, якщо використовується
+$global:archiveParams = 'a -mmt -mx5 -r -y -ssw -scrcSHA512 -bb0 -aoa'
+
+# Брати пароль архіву з Windows Credential Manager.
+# Команда для збереження:
+# cmdkey /generic:ARCHIV_VETOFFICE_ARCHIVE_PASSWORD /user:archive /pass:ВашПароль
+$global:enableArchivePassword = $false
+$global:archivePasswordCredentialTarget = 'ARCHIV_VETOFFICE_ARCHIVE_PASSWORD'
 
 # =============================================
-# SFTP
+# 5. ПЕРЕВІРКА АРХІВІВ
 # =============================================
 
-# Увімкнути завантаження архівів і hash-файлів на SFTP
-$enableSFTPUpload = $false
+# Перевіряти архів після створення через 7za.exe t.
+$global:enableArchiveIntegrityTest = $true
 
-# Облікові дані SFTP.
-# Не зберігайте реальні паролі у публічному репозиторії.
-$Login = "sftp_user"
-# Пароль SFTP з Windows Credential Manager.
-# Зберегти:
-#   cmdkey /generic:ARCHIV_VETOFFICE_SFTP_PASSWORD /user:sftp /pass:ВашПароль
-$sftpPasswordCredentialTarget = "ARCHIV_VETOFFICE_SFTP_PASSWORD"
-$Password = ""
+# Перевіряти, що архів не має підозріло малого розміру.
+$global:enableArchiveSizeValidation = $true
 
-# URL у форматі WinSCP, наприклад:
-#   sftp://backup.example.com/
-$sftpUrl = "sftp://backup.example.com/"
+# Мінімальний допустимий розмір архіву, MB.
+# 0 = не перевіряти.
+$global:minimumArchiveSizeMB = 1
+
+# Мінімальна частка архіву від розміру джерела у відсотках.
+# 0.1 = 0.1%.
+# 0 = не перевіряти.
+$global:minimumArchivePercentOfSource = 0.1
+
+# Опційне тестове відновлення архіву у тимчасову папку.
+$global:enableArchiveTestRestore = $false
+
+# Тимчасовий каталог для Test Restore.
+$global:archiveTestRestoreTempPath = "$env:TEMP\ARCHIV_VETOFFICE_TEST_RESTORE"
+
+# =============================================
+# 6. ПЕРЕВІРКА ВІЛЬНОГО МІСЦЯ
+# =============================================
+
+# Мінімальний резерв вільного місця, GB.
+$global:freeSpaceReserveGB = 5
+
+# Alias для сумісності зі старішою логікою.
+$global:archiveMinFreeSpaceGB = 5
+
+# Множник до розміру джерела.
+$global:archiveSpaceMultiplier = 1.2
+
+# Попередження при залишку менше N GB.
+$global:diskHealthWarningGB = 20
+
+# Помилка при залишку менше N GB.
+$global:diskHealthCriticalGB = 10
+
+# =============================================
+# 7. RETENTION
+# =============================================
+
+# Кількість лог-файлів, які залишати.
+$global:logRetentionDays = 31
+
+# Старий параметр кількості версій архівів.
+# Залишений для сумісності та як default для archiveRetentionKeepCount.
+$global:archiveVersions = 31
+
+# Увімкнути видалення старих архівів і відповідних .sha512.
+$global:enableArchiveDeletion = $true
+
+# Скільки останніх комплектів archive.mdz + archive.mdz.sha512 залишати.
+$global:archiveRetentionKeepCount = 31
+
+# Додаткове обмеження за віком у днях.
+# 0 = не використовувати обмеження за віком.
+$global:archiveRetentionKeepDays = 0
+
+# =============================================
+# 8. SFTP
+# =============================================
+
+# Увімкнути завантаження архівів і .sha512 на SFTP.
+$global:enableSFTPUpload = $false
+
+# Логін SFTP.
+$global:Login = 'sftp_user'
+
+# Пароль SFTP.
+# Рекомендовано зберігати у Windows Credential Manager, а тут залишати fallback.
+$global:Password = ''
+
+# Target у Windows Credential Manager для SFTP-пароля.
+# cmdkey /generic:ARCHIV_VETOFFICE_SFTP_PASSWORD /user:sftp /pass:ВашПароль
+$global:sftpPasswordCredentialTarget = 'ARCHIV_VETOFFICE_SFTP_PASSWORD'
+
+# URL SFTP.
+# Якщо URL без user:password, скрипт підставить Login/Password автоматично.
+$global:sftpUrl = 'sftp://backup.example.com/'
 
 # HostKey WinSCP.
-# Отримайте актуальне значення при першому підключенні або з налаштувань сервера.
-$sftpHostKey = "ssh-ed25519 255 SHA256:CHANGE_ME"
+$global:sftpHostKey = 'ssh-ed25519 255 SHA256:CHANGE_ME'
 
-# Віддалені каталоги SFTP
-$sftpDirectories = @{
-    Model = "/backup/VetOffice/Model"
-    BLOG  = "/backup/VetOffice/BLOG"
+# Віддалені каталоги.
+$global:sftpDirectories = @{
+    Model = 'archiv'
+    Blog  = 'blog'
 }
 
 # =============================================
-# КОПІЮВАННЯ В МЕРЕЖЕВУ ПАПКУ
+# 9. МЕРЕЖЕВЕ КОПІЮВАННЯ / SAMBA
 # =============================================
 
-# Увімкнути копіювання архівів у мережеву папку
-$enableNetworkCopy = $false
+# Увімкнути копіювання архівів і .sha512 у мережеву папку.
+$global:enableNetworkCopy = $false
 
-$networkCopyConfig = @{
-    NetworkPath = "\\SERVER\Backup\VetOffice"
-    Username    = ""
-    # Пароль мережевої папки з Windows Credential Manager.
-    # Зберегти:
-    #   cmdkey /generic:ARCHIV_VETOFFICE_NETWORK_PASSWORD /user:network /pass:ВашПароль
-    PasswordCredentialTarget = "ARCHIV_VETOFFICE_NETWORK_PASSWORD"
-    Password    = ""
-    MaxRetries  = 3
-    RetryDelay  = 10
+# Базовий UNC-шлях.
+$global:NetworkPath = '\\SERVER\Backup\VetOffice'
+
+$global:networkCopyConfig = @{
+    Enabled                  = $global:enableNetworkCopy
+    NetworkPath              = $global:NetworkPath
+    Username                 = ''
+
+    # Fallback-пароль. Краще використовувати Credential Manager.
+    Password                 = ''
+
+    # Target у Windows Credential Manager для пароля мережевої папки.
+    PasswordCredentialTarget = 'ARCHIV_VETOFFICE_NETWORK_PASSWORD'
+
+    # Кількість спроб підключення.
+    MaxRetries               = 3
+
+    # Затримка між спробами, секунди.
+    RetryDelay               = 5
 }
 
 # =============================================
-# ЛОГУВАННЯ ТА ВИВІД
+# 10. BAZA
 # =============================================
 
-# Рівень логування:
-#   DEBUG   - максимально детально
-#   INFO    - стандартний режим
-#   WARNING - тільки попередження і помилки
-#   ERROR   - тільки помилки
-$global:LogLevel = "INFO"
-
-# Показувати додаткову інформацію про систему
-$showSystemInfo = $false
-$showHardwareInfo = $false
-$showPerformanceInfo = $false
-
-# Режим сумісності, якщо потрібен для старих середовищ
-$compatibilityMode = $false
+$global:bazaPaths = @{
+    Source              = Join-Path $global:rootPath "BAZA"
+    Destination_Local   = Join-Path $global:archivPath "BAZA"
+    Destination_Network = Join-Path $global:NetworkPath "BAZA"
+}
 
 # =============================================
-# HEALTH-CHECK ВІЛЬНОГО МІСЦЯ
+# 11. СПОВІЩЕННЯ
 # =============================================
 
-# WARNING, якщо після виконання вільного місця менше цього значення.
-$diskHealthWarningGB = 20
-
-# ERROR, якщо після виконання вільного місця менше цього значення.
-$diskHealthCriticalGB = 10
-# =============================================
-# СПОВІЩЕННЯ
-# =============================================
-
-# Каркас для майбутніх сповіщень.
-# У v2.3 поки формується тільки план сповіщення у JSON/логах.
-$enableTelegramNotify = $false
-$enableEmailNotify = $false
+# Поки використовується для формування плану сповіщень у JSON/логах.
+$global:enableTelegramNotify = $false
+$global:enableEmailNotify = $false
 
 # Коли формувати сповіщення.
-$enableNotifyOnSuccess = $false
-$enableNotifyOnWarning = $true
-$enableNotifyOnError = $true
-
-# НАЛАШТУВАННЯ ПЕРЕВIРКИ НАДIЙНОСТI АРХIВIВ v2.5
-$global:enableArchiveSizeValidation = $true        # Перевiряти, що архiв не має пiдозрiло малого розмiру
-$global:minimumArchiveSizeMB = 1                   # Мiнiмальний розмiр архiву в MB; 0 = не перевiряти
-$global:minimumArchivePercentOfSource = 0.1        # Мiнiмальна частка архiву вiд розмiру джерела у %; 0 = не перевiряти
-$global:enableArchiveTestRestore = $false          # Виконувати тестове вiдновлення архiву у тимчасовий каталог
-$global:archiveTestRestoreTempPath = "$env:TEMP\ARCHIV_VETOFFICE_TEST_RESTORE"
+$global:enableNotifyOnSuccess = $false
+$global:enableNotifyOnWarning = $true
+$global:enableNotifyOnError = $true
