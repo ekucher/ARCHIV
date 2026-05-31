@@ -570,6 +570,7 @@ $progressMetadata = @{
 if ($ShowProgressState) {
     Show-BravoProgressState -StatePath $PROGRESS_STATE_FILE
     Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode 0
+    Release-BravoMaintenanceMutex
     exit 0
 }
 
