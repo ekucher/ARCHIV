@@ -8,7 +8,7 @@ function Restore-FromArchive {
         [string]$Destination,
         $ARC_PATH
     )
-    
+
     if (-not (Test-Path $ArchivePath)) {
         $errorMsg = "Архів для відновлення не знайдено: $ArchivePath"
         Write-Log "ПОМИЛКА: $errorMsg" -Level "ERROR"
@@ -17,14 +17,16 @@ function Restore-FromArchive {
         return 1
     }
 
-    $extractParams = @($SevenZipExtractArgs) + @(
-        "-o$Destination",
-        "-p$ArchivePassword",
-        $ArchivePath
-    )
-    
+    $extractParams = @($SevenZipExtractArgs) + @("-o$Destination")
+
+    if ($ArchivePasswordEnabled -eq "on" -and -not [string]::IsNullOrWhiteSpace($ArchivePassword)) {
+        $extractParams += "-p$ArchivePassword"
+    }
+
+    $extractParams += $ArchivePath
+
     $exitCode = Invoke-CommandWithLog -Command $ARC_PATH -Arguments $extractParams -Description "Відновлення моделі з архіву"
-    
+
     if ($exitCode -eq 0) {
         Write-Log "Модель успішно відновлена з архіву: $([System.IO.Path]::GetFileName($ArchivePath))" -Level "SUCCESS"
     } else {
@@ -33,7 +35,7 @@ function Restore-FromArchive {
         Send-SlackAlert -Message $errorMsg -IsCritical
         $global:criticalErrorOccurred = $true
     }
-    
+
     return $exitCode
 }
 
@@ -284,16 +286,31 @@ function Compress-OldData {
         $arcCommonParams,
         $ARC_PATH
     )
-    
+
     if (-not (Test-Path $ParentPath)) {
         Write-Log "[ПОМИЛКА] Директорія $ParentPath не знайдена. Архівація пропущена." -Level "ERROR"
         return
     }
-    
-    $cutoffDate = (Get-Date).AddDays(-$RetentionDays)
-    $oldDirs = Get-ChildItem -Path $ParentPath -Directory -ErrorAction SilentlyContinue | 
-        Where-Object { $_.Name -match '^\d{4}-\d{2}-\d{2}$' -and $_.CreationTime -lt $cutoffDate }
-    
+
+    $cutoffDate = (Get-Date).Date.AddDays(-$RetentionDays)
+    $oldDirs = Get-ChildItem -Path $ParentPath -Directory -ErrorAction SilentlyContinue |
+        Where-Object {
+            $includeDirectory = $false
+
+            if ($_.Name -match '^\d{4}-\d{2}-\d{2}$') {
+                try {
+                    $directoryDate = [datetime]::ParseExact($_.Name, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+                    $includeDirectory = ($directoryDate.Date -lt $cutoffDate)
+                }
+                catch {
+                    Write-Log "Не вдалося розпізнати дату директорії '$($_.Name)'. Архівація цієї директорії пропущена." -Level "WARNING"
+                    $includeDirectory = $false
+                }
+            }
+
+            $includeDirectory
+        }
+
     if (-not $oldDirs) {
         Write-Log "Немає старих директорій для архівації у $ParentPath" -Level "DEBUG"
         return
@@ -306,7 +323,7 @@ function Compress-OldData {
         $dirName = $dir.Name
         $archiveName = "${ArchiveNamePrefix}_$dirName.mdz"
         $archivePath = Join-Path -Path $ParentPath -ChildPath $archiveName
-        
+
         try {
             Write-Log "Архівація: $dirName -> $archiveName" -Level "INFO"
             $archiveOk = New-BravoVerifiedArchive `
@@ -315,7 +332,7 @@ function Compress-OldData {
                 -ArcCommonParams $arcCommonParams `
                 -ARC_PATH $ARC_PATH `
                 -Description "Архівація $dirName"
-            
+
             if ($archiveOk) {
                 Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction Stop
                 $archivedCount++
@@ -329,7 +346,7 @@ function Compress-OldData {
             Write-Log "ПОМИЛКА при архівації ${dirName}: $($_.Exception.Message)" -Level "ERROR"
         }
     }
-    
+
     if ($archivedCount -gt 0) {
         Write-Log "[ІНФО] Архівовано $archivedCount директорій" -Level "SUCCESS"
     }

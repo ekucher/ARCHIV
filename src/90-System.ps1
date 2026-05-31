@@ -87,7 +87,7 @@ function Invoke-CommandWithLog {
     )
     
     Write-Log "$Description..." -Level "DEBUG"
-    $output = & $Command $Arguments 2>&1 | Out-String
+    $output = & $Command @Arguments 2>&1 | Out-String
     $formattedOutput = Format-CommandOutput -Output $output
     
     if ($LASTEXITCODE -eq 0) {

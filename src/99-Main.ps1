@@ -304,6 +304,44 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 # Enforce modern security protocol
+# Prevent parallel maintenance runs
+$script:BravoMaintenanceMutex = New-Object System.Threading.Mutex($false, "Global\BRAVO_MAINTENANCE")
+$script:BravoMaintenanceMutexAcquired = $false
+
+try {
+    $script:BravoMaintenanceMutexAcquired = $script:BravoMaintenanceMutex.WaitOne(0)
+}
+catch {
+    Write-Host "ПОМИЛКА: Не вдалося ініціалізувати runtime lock BRAVO_MAINTENANCE: $($_.Exception.Message)" -ForegroundColor Red
+    exit 2
+}
+
+if (-not $script:BravoMaintenanceMutexAcquired) {
+    Write-Host "ПОМИЛКА: BRAVO_MAINTENANCE вже запущений. Повторний запуск заблоковано." -ForegroundColor Red
+    exit 2
+}
+
+try {
+    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+        if ($script:BravoMaintenanceMutex -and $script:BravoMaintenanceMutexAcquired) {
+            try {
+                $script:BravoMaintenanceMutex.ReleaseMutex()
+            }
+            catch {
+            }
+
+            try {
+                $script:BravoMaintenanceMutex.Dispose()
+            }
+            catch {
+            }
+        }
+    } | Out-Null
+}
+catch {
+    # Engine exit event is a cleanup helper only. Do not block runtime if registration fails.
+}
+
 Set-BravoTlsProtocol
 
 # Clear console
@@ -1411,18 +1449,3 @@ Write-Log -Message "==="
 $exitCode = $(if ($global:criticalErrorOccurred) {1} else {0})
 Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $exitCode
 exit $exitCode
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
