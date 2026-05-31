@@ -699,6 +699,7 @@ if ($HealthCheckOnly) {
     Send-FinalReport -LOG_FILE $LOG_FILE
     $healthExitCode = $(if ($healthResult.HasCriticalIssues) {1} else {0})
     Wait-BravoInteractiveExit -TaskUserName $TaskUserName -ExitCode $healthExitCode
+    Release-BravoMaintenanceMutex
     exit $healthExitCode
 }
 Write-Log -Message "==="
